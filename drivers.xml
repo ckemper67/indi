@@ -333,6 +333,10 @@
             <driver name="Celestron SCT">indi_celestron_sct_focus</driver>
             <version>1.0</version>
         </device>
+        <device label="DarkSkyGeek" manufacturer="DarkSkyGeek">
+            <driver name="DarkSkyGeek">indi_darkskygeek_focus</driver>
+            <version>0.1</version>
+        </device>
         <device label="AAF2" manufacturer="DIY">
             <driver name="AAF2">indi_aaf2_focus</driver>
             <version>1.0</version>
