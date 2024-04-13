@@ -1,3 +1,11 @@
+# ############### DarkSkyGeek Focuser ################
+SET(darkskygeek_SRC
+    darkskygeek.cpp)
+
+add_executable(indi_darkskygeek_focus ${darkskygeek_SRC})
+target_link_libraries(indi_darkskygeek_focus indidriver)
+install(TARGETS indi_darkskygeek_focus RUNTIME DESTINATION bin)
+
 # ############### Focuser Simulator ################
 SET(focussimulator_SRC
     focus_simulator.cpp)
