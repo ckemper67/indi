@@ -225,7 +225,7 @@ bool DarkSkyGeek::isMoving()
 
     if (sendCommand(COMMAND_FOCUSER_ISMOVING, RESULT_FOCUSER_ISMOVING, res) == false)
         return false;
-    LOGF_INFO("isMoving %s", res);
+    LOGF_DEBUG("isMoving %s", res);
 
     if (strcmp(res, TRUE) == 0)
         return true;
@@ -261,7 +261,7 @@ IPState DarkSkyGeek::MoveAbsFocuser(uint32_t targetTicks)
         return IPS_ALERT;
 
     targetPos = targetTicks;
-    LOGF_INFO("Move %d:%s", targetTicks, res);
+    LOGF_DEBUG("Move %d:%s", targetTicks, res);
     if (strcmp(res, OK) == 0)
         return IPS_BUSY;
     else
@@ -353,26 +353,27 @@ bool DarkSkyGeek::sendCommand(const char * cmd, const char * resultPrefix, char 
     if (res == nullptr)
         return true;
 
-    if ((rc = tty_nread_section(PortFD, result, MAXRBUF, DRIVER_DEL, DRIVER_TIMEOUT, &nbytes_read)) != TTY_OK)
+    if ((rc = tty_nread_section(PortFD, res, MAXRBUF, DRIVER_DEL, DRIVER_TIMEOUT, &nbytes_read)) != TTY_OK)
     {
         char errstr[MAXRBUF] = {0};
         tty_error_msg(rc, errstr, MAXRBUF);
         LOGF_ERROR("Serial read error: %s.", errstr);
         return false;
     }
-    result[nbytes_read - 1] = 0;
+    res[nbytes_read - 1] = 0;
     // Arduino Serial.println() writes CR/LF
-    if( result[nbytes_read - 2] == '\r') res[nbytes_read - 2] = 0;
+    if( res[nbytes_read - 2] == '\r') res[nbytes_read - 2] = 0;
 
     LOGF_DEBUG("RES <%s>", result);
 
     tcflush(PortFD, TCIOFLUSH);
-    if (strncmp(result, resultPrefix, strlen(resultPrefix))!= 0)
+    if (strncmp(res, resultPrefix, strlen(resultPrefix))!= 0)
     {
         LOGF_ERROR("Invalid response from device: %s.", result);
         return false;
     }
+    // trim off the prefix to get the result
     size_t prefixLength = strlen(resultPrefix);
-    strncpy(res, result +  prefixLength, nbytes_read);
+    memmove(res, res +  prefixLength, nbytes_read - prefixLength);
     return true;
 }
