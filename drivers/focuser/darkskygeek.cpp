@@ -98,7 +98,7 @@ bool DarkSkyGeek::initProperties()
     addDebugControl();
     // Set default baud rate to 57600
     serialConnection->setDefaultBaudRate(Connection::Serial::B_57600);
-
+    serialConnection->setWordSize(8);
     return true;
 }
 
@@ -360,8 +360,9 @@ bool DarkSkyGeek::sendCommand(const char * cmd, const char * resultPrefix, char 
         LOGF_ERROR("Serial read error: %s.", errstr);
         return false;
     }
-    // Trim the '\n'
-    result[nbytes_read-2] = 0;
+    result[nbytes_read - 1] = 0;
+    // Arduino Serial.println() writes CR/LF
+    if( result[nbytes_read - 2] == '\r') res[nbytes_read - 2] = 0;
 
     LOGF_DEBUG("RES <%s>", result);
 
