@@ -25,39 +25,45 @@
 
 #include "indilogger.h"
 
-/////////////////////////////////////////////////////////////////////
-
 // Angle implementation
 
 Angle::Angle(double value, ANGLE_UNITS type)
 {
     switch(type)
     {
+        case ARCSECONDS:
+            angle = value;
+            break;
         case DEGREES:
-            angle = range(value);
+            angle = value * 3600.0;
             break;
         case HOURS:
-            angle = range(value * 15.0);
+            angle = value * 15.0 * 3600.0;
             break;
         case RADIANS:
-            angle = range(value * 180.0 / M_PI);
+            angle = value * 180.0 * 3600.0 / M_PI;
             break;
     }
 }
 
+double Angle::arcsecs()
+{
+    return this->angle;
+}
+
 double Angle::radians()
 {
-    return this->angle * M_PI / 180.0;
+    return this->angle * M_PI / (180.0 * 3600.0);
 }
 
 bool Angle::operator== (const Angle &a)
 {
-    return std::abs(difference(a)) < 10E-6;
+    return std::abs(difference(a)) < 1.0e-6; // Adjust tolerance as needed
 }
 
 bool Angle::operator!= (const Angle &a)
 {
-    return std::abs(difference(a)) >= 10E-6;
+    return std::abs(difference(a)) >= 1.0e-6; // Adjust tolerance as needed
 }
 
 ////////////////////////////////////////////////////////////////////

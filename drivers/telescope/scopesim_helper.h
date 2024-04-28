@@ -44,210 +44,263 @@ static char device_str[64] = "Telescope Simulator";
 ///
 /// \brief The Angle class
 /// This class implements an angle type.
-/// This holds an angle that is always in the range -180 to +180
-/// Relational and arithmetic operators work over the -180 - +180 discontinuity
+/// This holds an angle that is always in the range -648000 to +648000 arcseconds
+/// Relational and arithmetic operators work over the -648000 - +648000 discontinuity
 ///
 class Angle
 {
-    private:
-        double angle;     // position in degrees, range -180 to 0 to 180
+private:
+    double angle; // position in arcseconds, range -648000 to 0 to 648000
 
-        ///
-        /// \brief range
-        /// \param deg
-        /// \return returns an angle in degrees folded to the range -179.999... to 0 to 180
-        ///
-        static double range(double deg)
+    ///
+    /// \brief range
+    /// \param arcsecs
+    /// \return returns an angle in arcseconds folded to the range -647999... to 0 to 648000
+    ///
+    static double range(double arcsecs)
+    {
+        while (arcsecs > 648000.0) arcsecs -= 1296000.0;
+        while (arcsecs <= -648000.0) arcsecs += 1296000.0;
+        return arcsecs;
+    }
+
+    static double degToArcsec(double deg)
+    {
+        return range(deg * 3600.0);
+    }
+
+    static double hrsToArcsec(double hrs)
+    {
+        return range(hrs * 15.0 * 3600.0);
+    }
+
+public:
+  enum ANGLE_UNITS {DEGREES, HOURS, RADIANS, ARCSECS};
+
+    Angle()
+    {
+        angle = 0;
+    }
+
+    Angle(double value, ANGLE_UNITS type)
+    {
+        switch (type)
         {
-            while (deg > 180.0) deg -= 360.0;
-            while (deg <= -180.0) deg += 360.0;
-            return deg;
+        case ARCSECS:
+            angle = value;
+            break;
+        case DEGREES:
+            angle = degToArcsec(value);
+            break;
+        case HOURS:
+            angle = hrsToArcsec(value);
+            break;
+        case RADIANS:
+            angle = degToArcsec(value * 180.0 / M_PI);
+            break;
         }
+    }
 
-        static double hrstoDeg(double hrs)
-        {
-            return range(hrs * 15.0);
-        }
+    Angle(double degrees)
+    {
+        angle = degToArcsec(degrees);
+    }
 
-    public:
-        enum ANGLE_UNITS {DEGREES, HOURS, RADIANS};
+    //virtual ~Angle() = default;
 
-        Angle()
-        {
-            angle = 0;
-        }
+    ///
+    /// \brief Degrees
+    /// \return angle in degrees, range -180 to 0 to +180
+    ///
+    double Degrees()
+    {
+        return angle / 3600.0;
+    }
 
-        Angle(double value, ANGLE_UNITS type);
+    ///
+    /// \brief Degrees360
+    /// \return angle in degrees, range 0 to 360
+    ///
+    double Degrees360()
+    {
+        double deg = angle / 3600.0;
+        return (deg >= 0) ? deg : 360.0 + deg;
+    }
 
-        Angle(double degrees)
-        {
-            angle = range(degrees);
-        }
+    ///
+    /// \brief Hours
+    /// \return angle in hours, range 0 to 24
+    ///
+    double Hours()
+    {
+        double h = angle / (15.0 * 3600.0);
+        if (h < 0.0)
+            h = 24 + h;
+        return h;
+    }
 
-        //virtual ~Angle() = default;
+    ///
+    /// \brief HoursHa
+    /// \return angle in hours, range -12 to +12
+    ///
+    double HoursHa()
+    {
+        return angle / (15.0 * 3600.0);
+    }
 
-        ///
-        /// \brief Degrees
-        /// \return angle in degrees, range -180 to 0 to +180
-        ///
-        double Degrees()
-        {
-            return angle;
-        }
+    ///
+    /// \brief radians
+    /// \return angle in radians, range -Pi to 0 to +PI
+    ///
+    double radians()
+    {
+        return angle * M_PI / (180.0 * 3600.0);
+    }
 
-        ///
-        /// \brief Degrees360
-        /// \return angle in degrees, range 0 to 360
-        ///
-        double Degrees360()
-        {
-            return (angle >= 0) ? angle : 360.0 + angle;
-        }
+    ///
+    /// \brief arcsecs
+    /// \return angle in arcseconds, range range -648000 to 0 to 648000
+    ///
+    double arcsecs()
+    {
+        return angle;
+    }
 
-        ///
-        /// \brief Hours
-        /// \return angle in hours, range 0 to 24
-        ///
-        double Hours()
-        {
-            double h = angle / 15.0;
-            if (h < 0.0)
-                h = 24 + h;
-            return h;
-        }
-        ///
-        /// \brief HoursHa
-        /// \return angle in hours, range -12 to +12
-        ///
-        double HoursHa()
-        {
-            return angle / 15.0;
-        }
+    ///
+    /// \brief setDegrees
+    /// set the angle in degrees
+    /// \param deg angle in degrees
+    ///
+    void setArcSeconds(double arcsecs)
+    {
+        angle = arcsecs;
+    }
 
-        ///
-        /// \brief radians
-        /// \return angle in radians, range -Pi to 0 to +PI
-        ///
-        double radians();
+    ///
+    /// \brief setDegrees
+    /// set the angle in degrees
+    /// \param deg angle in degrees
+    ///
+    void setDegrees(double deg)
+    {
+        angle = degToArcsec(deg);
+    }
 
-        ///
-        /// \brief setDegrees
-        /// set the angle in degrees
-        /// \param deg angle in degrees
-        ///
-        void setDegrees(double deg)
-        {
-            angle = range(deg);
-        }
+    ///
+    /// \brief setHours set the angle
+    /// \param hrs angle in hours
+    ///
+    void setHours(double hrs)
+    {
+        angle = hrsToArcsec(hrs);
+    }
 
-        ///
-        /// \brief setHours set the angle
-        /// \param hrs angle in hours
-        ///
-        void setHours(double hrs)
-        {
-            angle = hrstoDeg(hrs);
-        }
+    Angle add(Angle a)
+    {
+        double total = a.angle + this->angle;
+        return Angle(total, ARCSECS);
+    }
 
-        Angle add(Angle a)
-        {
-            double total = a.Degrees() + this->Degrees();
-            return Angle(total);
-        }
+    Angle subtract(Angle a)
+    {
+      return Angle((this->angle - a.angle),ARCSECS);
+    }
 
-        Angle subtract(Angle a)
-        {
-            return Angle(this->Degrees() - a.Degrees());
-        }
+    double difference(Angle a)
+    {
+        return range(this->angle - a.angle) / 3600.0;
+    }
 
-        double difference(Angle a)
-        {
-            return range(this->angle - a.angle);
-        }
+    Angle operator - ()
+    {
+      return Angle(-this->angle, ARCSECS);
+    }
 
-        Angle operator - ()
-        {
-            return Angle(-this->angle);
-        }
+    Angle &operator += (const Angle &a)
+    {
+        angle = range(angle + a.angle);
+        return *this;
+    }
 
-        Angle &operator += (const Angle &a)
-        {
-            angle = range(angle + a.angle);
-            return *this;
-        }
+    Angle &operator += (const double d)
+    {
+        angle = range(angle + degToArcsec(d));
+        return *this;
+    }
 
-        Angle &operator += (const double d)
-        {
-            angle = range(angle + d);
-            return *this;
-        }
+    Angle &operator-= (const Angle &a)
+    {
+        angle = range(angle - a.angle);
+        return *this;
+    }
 
-        Angle &operator-= (const Angle &a)
-        {
-            angle = range(angle - a.angle);
-            return *this;
-        }
+    Angle &operator-= (const double d)
+    {
+        angle = range(angle - degToArcsec(d));
+        return *this;
+    }
 
-        Angle &operator-= (const double d)
-        {
-            angle = range(angle - d);
-            return *this;
-        }
+    Angle operator+ (const Angle &a)
+    {
+      return Angle((this->angle + a.angle), ARCSECS);
+    }
 
-        Angle operator+ (const Angle &a)
-        {
-            return Angle(this->angle + a.angle);
-        }
+    Angle operator+ (const double &d)
+    {
+      return Angle((this->angle + degToArcsec(d)), ARCSECS);
+    }
 
-        Angle operator+ (const double &d)
-        {
-            return Angle(this->angle + d);
-        }
+    Angle operator- (const Angle &rhs)
+    {
+      return Angle((this->angle - rhs.angle), ARCSECS);
+    }
 
-        Angle operator- (const Angle &rhs)
-        {
-            return Angle(this->angle - rhs.angle);
-        }
+    Angle operator- (const double &rhs)
+    {
+      return Angle((this->angle - degToArcsec(rhs)), ARCSECS);
+    }
 
-        Angle operator- (const double &rhs)
-        {
-            return Angle(this->angle - rhs);
-        }
+    ///
+    /// \brief operator *
+    /// multiplies the angle by a double,
+    /// used to manage tracking and slewing
+    /// \param duration as a double
+    /// \return Angle
+    ///
+    Angle operator * (const double duration)
+    {
+      return Angle(this->angle * duration, ARCSECS);
+    }
 
-        ///
-        /// \brief operator *
-        /// multiplies the angle by a double,
-        /// used to manage tracking and slewing
-        /// \param duration as a double
-        /// \return Angle
-        ///
-        Angle operator * (const double duration)
-        {
-            return Angle(this->angle * duration);
-        }
+    bool operator== (const Angle &a)
+    {
+        return this->angle == a.angle;
+    }
 
-        bool operator== (const Angle &a);
+    bool operator!= (const Angle &a)
+    {
+        return this->angle != a.angle;
+    }
 
-        bool operator!= (const Angle &a);
+    bool operator > (const Angle &a)
+    {
+        return difference(a) > 0;
+    }
 
-        bool operator > (const Angle &a)
-        {
-            return difference(a) > 0;
-        }
-
-        bool operator < (const Angle &a)
-        {
-            return difference(a) < 0;
-        }
-        bool operator >= (const Angle &a)
-        {
-            return difference(a) >= 0;
-        }
-        bool operator <= (const Angle &a)
-        {
-            return difference(a) <= 0;
-        }
+    bool operator < (const Angle &a)
+    {
+        return difference(a) < 0;
+    }
+    bool operator >= (const Angle &a)
+    {
+        return difference(a) >= 0;
+    }
+    bool operator <= (const Angle &a)
+    {
+        return difference(a) <= 0;
+    }
 };
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -521,7 +574,7 @@ class Alignment
         ///
         void correction(Angle instrumentHa, Angle instrumentDec, Angle *correctionHa, Angle *correctionDec);
 
-        // mount model, these angles are in degrees
+        // mount model, these angles are in arcseconds
         // the angles are small so use double to avoid
         // loads of conversions
         ///
