@@ -55,6 +55,7 @@ install(TARGETS AlignmentDriver
 install(FILES
     AlignmentSubsystemForMathPlugins.h
     AlignmentSubsystemForDrivers.h
+    AverageMathPlugin.h
     BasicMathPlugin.h
     BuiltInMathPlugin.h
     NearestMathPlugin.h
@@ -136,6 +137,28 @@ install(TARGETS AlignmentClient ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 # target_link_libraries(indi_Dummy_MathPlugin indidriver)
 
 # install(TARGETS indi_Dummy_MathPlugin LIBRARY DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
+
+# #################################################
+# ############### Average math plugin #############
+# #################################################
+set(AverageMathPlugin_SRCS
+    AverageMathPlugin.cpp
+)
+
+add_library(indi_Average_MathPlugin SHARED ${AverageMathPlugin_SRCS})
+target_include_directories(indi_Average_MathPlugin
+    PRIVATE
+        ${libindi_SOURCE_DIR}/libs/indicore
+)
+target_link_libraries(indi_Average_MathPlugin
+    indidriver
+    $<$<PLATFORM_ID:CYGWIN>:AlignmentDriver>
+)
+
+install(TARGETS indi_Average_MathPlugin
+    ARCHIVE DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
+    LIBRARY DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
+    RUNTIME DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
 
 # #################################################
 # ############### Nearest math plugin #############

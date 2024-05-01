@@ -52,10 +52,10 @@ void MathPluginManagement::InitProperties(Telescope *ChildTelescope)
         AlignmentSubsystemMathPluginsV.sp[configPlugin].s = ISS_ON;
         HandlePluginLoading(ChildTelescope, 0, configPlugin);
     }
-    // Select nearest if available
+    // Select average if available
     else
     {
-        ISwitch *sp = IUFindSwitch(&AlignmentSubsystemMathPluginsV, "Nearest Math Plugin");
+        ISwitch *sp = IUFindSwitch(&AlignmentSubsystemMathPluginsV, "Average Math Plugin");
         if (sp)
         {
             IUResetSwitch(&AlignmentSubsystemMathPluginsV);
