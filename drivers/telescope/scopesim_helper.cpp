@@ -320,20 +320,16 @@ void Alignment::apparentRaDecToMount(Angle apparentRa, Angle apparentDec, Angle*
                 primary->Degrees(), secondary->Degrees());
 }
 
-#define NEW
-
 void Alignment::instrumentToObserved(Angle instrumentHa, Angle instrumentDec, Angle * observedHa, Angle* observedDec)
 {
-    static Angle maxDec = Angle(89);
-
     // do the corrections consecutively
     // apply Ha and Dec zero offsets
     *observedHa = instrumentHa + IH;
     *observedDec = instrumentDec + ID;
 
     // apply collimation (cone) error, limited to CH * 10
-    double cosDec = *observedDec < maxDec ? std::cos(observedDec->radians()) : std::cos(maxDec.radians());
-    double tanDec = *observedDec < maxDec ? std::tan(observedDec->radians()) : std::tan(maxDec.radians());
+    double cosDec = std::cos(observedDec->radians());
+    double tanDec = std::tan(observedDec->radians());
 
     *observedHa += (CH / cosDec);
     // apply Ha and Dec axis non perpendiculary, limited to NP * 10
@@ -348,15 +344,11 @@ void Alignment::instrumentToObserved(Angle instrumentHa, Angle instrumentDec, An
 
     *observedHa = vMe.primary();
     *observedDec = vMe.secondary();
+    LOGF_INFO("i2O Ha: %f, dec: %f", instrumentHa - *observedHa, instrumentDec - *observedDec);
 }
 
 void Alignment::observedToInstrument(Angle observedHa, Angle observedDec, Angle * instrumentHa, Angle *instrumentDec)
 {
-#ifdef NEW
-
-    // avoid errors near dec 90 by limiting sec and tan dec to 57
-    static Angle maxDec = Angle(89);
-
     // do the corrections consecutively
     // use vector rotations for MA and ME so they work close to the pole
     // rotate about the EW axis (Y)
@@ -369,53 +361,16 @@ void Alignment::observedToInstrument(Angle observedHa, Angle observedDec, Angle 
     *instrumentDec = vMa.secondary();
 
     // apply Ha and Dec axis non perpendiculary, limited to maxDec
-    double tanDec = *instrumentDec < maxDec ? std::tan(instrumentDec->radians()) : std::tan(maxDec.radians());
+    double tanDec = std::tan(instrumentDec->radians());
     *instrumentHa -= (NP * tanDec);
     // apply collimation (cone) error, limited to maxDec
-    double cosDec = *instrumentDec < maxDec ? std::cos(instrumentDec->radians()) : std::cos(maxDec.radians());
+    double cosDec = std::cos(instrumentDec->radians());
     *instrumentHa -= (CH / cosDec);
 
     // apply Ha and Dec zero offsets
     *instrumentHa -= IH;
     *instrumentDec -= ID;
-
-#else
-
-
-    Angle correctionHa, correctionDec;
-    correction(observedHa, observedDec, &correctionHa, &correctionDec);
-    // subtract the correction to get a first pass at the instrument
-    *instrumentHa = observedHa - correctionHa;
-    *instrumentDec = observedDec - correctionDec;
-
-    static const Angle minDelta(1.0 / 3600.0);   // 1.0 arc seconds
-    Angle dHa(180);
-    Angle dDec(180);
-    int num = 0;
-    while ( num < 10)
-    {
-        // use the previously calculated instrument to get a new position
-        Angle newHa, newDec;
-        correction(*instrumentHa, *instrumentDec, &correctionHa, &correctionDec);
-        newHa = *instrumentHa + correctionHa;
-        newDec = *instrumentDec + correctionDec;
-        // get the deltas
-        dHa = observedHa - newHa;
-        dDec = observedDec - newDec;
-        //            LOGF_DEBUG("observedToInstrument %i: observed %f, %f, new %f, %f, delta %f, %f", num,
-        //                       observedHa.Degrees(), observedDec.Degrees(),
-        //                       newHa.Degrees(), newDec.Degrees(), dHa.Degrees(), dDec.Degrees());
-        if (Angle(fabs(dHa.Degrees())) < minDelta && Angle(fabs(dDec.Degrees())) < minDelta)
-        {
-            return;
-        }
-        // apply the delta
-        *instrumentHa += dHa;
-        *instrumentDec += dDec;
-        num++;
-    }
-    LOGF_DEBUG("mountToObserved iterations %i, delta %f, %f", num, dHa.Degrees(), dDec.Degrees());
-#endif
+    LOGF_INFO("o2I Ha: %f, dec: %f", observedHa - *instrumentHa, observedDec - *instrumentDec);
 }
 
 // corrections based on the instrument position, add to instrument to get observed
@@ -426,17 +381,8 @@ void Alignment::correction(Angle instrumentHa, Angle instrumentDec, Angle * corr
     *correctionHa = IH;
     *correctionDec = ID;
 
-    // avoid errors near dec 90 by limiting sec and tan dec to 100
-    static const double minCos = 0.01;
-    static const double maxTan = 100.0;
-
     double cosDec = std::cos(instrumentDec.radians());
-    if (cosDec >= 0 && cosDec < minCos) cosDec = minCos;
-    else if (cosDec <= 0 && cosDec > -minCos) cosDec = -minCos;
-
     double tanDec = std::tan(instrumentDec.radians());
-    if (tanDec > maxTan) tanDec = maxTan;
-    if (tanDec < -maxTan) tanDec = -maxTan;
 
     double cosHa = std::cos(instrumentHa.radians());
     double sinHa = std::sin(instrumentHa.radians());
@@ -454,7 +400,7 @@ void Alignment::correction(Angle instrumentHa, Angle instrumentDec, Angle * corr
     *correctionHa += (ME * sinHa * tanDec);
     *correctionDec += (ME * cosHa);
 
-    LOGF_EXTRA1("correction %f, %f", correctionHa->Degrees(), correctionDec->Degrees());
+    LOGF_INFO("correction %f, %f", correctionHa->Degrees(), correctionDec->Degrees());
 }
 
 #ifdef FALSE
@@ -468,13 +414,13 @@ Alignment::apparentHaDecToMount(Vector HaDec, Vector *mount)
 
 void Alignment::setCorrections(double ih, double id, double ch, double np, double ma, double me)
 {
-    IH = ih;
-    ID = id;
-    CH = ch;
-    NP = np;
-    MA = ma;
-    ME = me;
-    LOGF_DEBUG("setCorrections IH %f, ID %f, CH %f, NP %f, MA %f, ME %f", IH, ID, CH, NP, MA, ME);
+    IH = ih / 3600;
+    ID = id / 3600;
+    CH = ch / 3600;
+    NP = np / 3600;
+    MA = ma / 3600;
+    ME = me / 3600;
+    LOGF_INFO("setCorrections IH %f, ID %f, CH %f, NP %f, MA %f, ME %f", ih, id, ch, np, ma, me);
 }
 
 /////////////////////////////////////////////////////////////////////////

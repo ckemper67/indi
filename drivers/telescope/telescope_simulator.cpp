@@ -75,12 +75,12 @@ bool ScopeSim::initProperties()
     simPierSideSP.fill(getDeviceName(), "SIM_PIER_SIDE", "Sim Pier Side",
                        "Simulation", IP_WO, ISR_1OFMANY, 60, IPS_IDLE);
 
-    mountModelNP[MM_IH].fill("MM_IH", "Ha Zero (IH)", "%g", -5, 5, 0.01, 0);
-    mountModelNP[MM_ID].fill("MM_ID", "Dec Zero (ID)", "%g", -5, 5, 0.01, 0);
-    mountModelNP[MM_CH].fill("MM_CH", "Cone (CH)", "%g", -5, 5, 0.01, 0);
-    mountModelNP[MM_NP].fill("MM_NP", "Ha/Dec (NP)", "%g", -5, 5, 0.01, 0);
-    mountModelNP[MM_MA].fill("MM_MA", "Pole Azm (MA)", "%g", -5, 5, 0.01, 0);
-    mountModelNP[MM_ME].fill("MM_ME", "Pole elev (ME)", "%g", -5, 5, 0.01, 0);
+    mountModelNP[MM_IH].fill("MM_IH", "Ha Zero (IH)", "%f", -648000, 648000, 1, 0);
+    mountModelNP[MM_ID].fill("MM_ID", "Dec Zero (ID)", "%f", -32400, 32400, 1, 0);
+    mountModelNP[MM_CH].fill("MM_CH", "Cone (CH)", "%f", -3600, 3600, 1, 0);
+    mountModelNP[MM_NP].fill("MM_NP", "Ha/Dec (NP)", "%f", -3600, 3600, 1, 0);
+    mountModelNP[MM_MA].fill("MM_MA", "Pole Azm (MA)", "%f", -3600, 3600, 1, 0);
+    mountModelNP[MM_ME].fill("MM_ME", "Pole elev (ME)", "%f", -3600, 3600, 1, 0);
     mountModelNP.fill(getDeviceName(), "MOUNT_MODEL", "Mount Model",
                       "Simulation", IP_WO, 0, IPS_IDLE);
 
