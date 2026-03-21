@@ -25,6 +25,51 @@
 #include <libnova/julian_day.h>
 #include <libastro.h>
 
+#ifdef HAVE_ERFA
+#include <erfa.h>
+
+/**
+ * Compute equinox-based apparent RA/Dec for an ICRS (J2000) catalog source.
+ *
+ * Uses eraAtco13 with refraction disabled (phpa=0), which applies: annual
+ * aberration, frame rotation (precession+nutation+bias), Earth rotation,
+ * and diurnal aberration.  The result is in the equinox-based apparent frame
+ * that matches libnova's JNow system, enabling a direct comparison.
+ *
+ * @param ra_icrs   ICRS right ascension (radians)
+ * @param dec_icrs  ICRS declination (radians)
+ * @param jd_utc    Julian date (UTC)
+ * @param lon_rad   Observer longitude (radians, east positive)
+ * @param lat_rad   Observer latitude (radians, north positive)
+ * @param alt_m     Observer altitude above geoid (metres)
+ * @param ra_app    Output: equinox-based apparent RA (radians, [0, 2pi))
+ * @param dec_app   Output: apparent Dec (radians)
+ */
+static void erfaApparentPlace(double ra_icrs, double dec_icrs,
+                               double jd_utc,
+                               double lon_rad, double lat_rad, double alt_m,
+                               double *ra_app, double *dec_app)
+{
+    // Split at half-integer day — ERFA cookbook recommended split for UTC
+    double utc1 = std::floor(jd_utc) + 0.5;
+    double utc2 = jd_utc - utc1;
+
+    double aob, zob, hob, dob, rob, eo;
+    eraAtco13(ra_icrs, dec_icrs,
+              0.0, 0.0, 0.0, 0.0,      // proper motion, parallax, radial velocity
+              utc1, utc2, 0.0,          // UTC (2-part), DUT1=0
+              lon_rad, lat_rad, alt_m,
+              0.0, 0.0,                 // polar motion xp, yp
+              0.0, 15.0, 0.0, 0.55,    // phpa=0 (no refraction), tc, rh, wl
+              &aob, &zob, &hob, &dob, &rob, &eo);
+
+    // rob is CIRS RA.  Subtract equation of origins to get equinox-based
+    // apparent RA, matching the frame libnova uses for JNow.
+    *ra_app  = eraAnp(rob - eo);
+    *dec_app = dob;
+}
+#endif // HAVE_ERFA
+
 #include <cmath>
 #include <unistd.h>
 #include <sys/types.h>
@@ -221,6 +266,7 @@ bool CCDSim::initProperties()
 #else
     IDSnoopDevice(mount, "EQUATORIAL_EOD_COORD");
 #endif
+    IDSnoopDevice(mount, "GEOGRAPHIC_COORD");
 
     IDSnoopDevice(focuser, "FWHM");
 
@@ -668,7 +714,16 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             epochPos.rightascension  = currentRA;
             epochPos.declination = currentDE;
 
-            // Convert from JNow to J2000
+#ifdef HAVE_ERFA
+            // Save JNow apparent place before converting to J2000.
+            // JNow IS the apparent place (equinox-based) as INDI reports it.
+            // We use it as the gnomonic projection centre so the per-star
+            // ERFA apparent positions are in the same coordinate frame.
+            const double jnow_ra_rad  = currentRA * (M_PI / 12.0);   // hours → rad
+            const double jnow_dec_rad = currentDE * (M_PI / 180.0);
+#endif
+
+            // Convert from JNow to J2000 (used only for the GSC catalog query)
             INDI::ObservedToJ2000(&epochPos, jd, &J2000Pos);
 
             currentRA  = J2000Pos.rightascension;
@@ -686,6 +741,7 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 #endif
 
         //  calc this now, we will use it a lot later
+        // rad/rar/decr are in J2000 — used only for the GSC catalog query.
         rad = currentRA * 15.0 + PEOffset;
         rar = rad * 0.0174532925;
         //  offsetting the dec by the guide head offset
@@ -697,6 +753,18 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         // Add declination drift, if any.
         decr += decDrift / 3600.0 * 0.0174532925;
+
+#ifdef HAVE_ERFA
+        // Projection boresight in apparent (JNow) frame with the same
+        // small offsets applied. Stars will be projected as ERFA apparent
+        // positions against this centre, keeping the frame self-consistent.
+        double rar_proj  = jnow_ra_rad  + PEOffset         * (M_PI / 180.0);
+        double decr_proj = jnow_dec_rad + (m_OAGOffset / 60.0) * (M_PI / 180.0);
+        decr_proj += decDrift / 3600.0 * (M_PI / 180.0);
+#else
+        double rar_proj  = rar;
+        double decr_proj = decr;
+#endif
 
         //  now lets calculate the radius we need to fetch
         double radius = sqrt((Scalex * Scalex * targetChip->getXRes() / 2.0 * targetChip->getXRes() / 2.0) +
@@ -778,18 +846,31 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                         double ccdx;
                         double ccdy;
 
-                        srar  = ra * 0.0174532925;
+#ifdef HAVE_ERFA
+                        // Compute ERFA apparent place for this catalog star.
+                        // GSC returns J2000 ICRS degrees; convert to apparent
+                        // in the same equinox-based frame as the JNow boresight.
+                        erfaApparentPlace(ra  * (M_PI / 180.0),
+                                          dec * (M_PI / 180.0),
+                                          jd,
+                                          m_SiteLongitude * (M_PI / 180.0),
+                                          m_SiteLatitude  * (M_PI / 180.0),
+                                          m_SiteAltitude,
+                                          &srar, &sdecr);
+#else
+                        srar  = ra  * 0.0174532925;
                         sdecr = dec * 0.0174532925;
+#endif
 
                         //  Handbook of astronomical image processing
                         //  page 253
                         //  equations 9.1 and 9.2
                         //  convert ra/dec to standard co-ordinates
 
-                        sx = cos(sdecr) * sin(srar - rar) /
-                             (cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr));
-                        sy = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) /
-                             (cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr));
+                        sx = cos(sdecr) * sin(srar - rar_proj) /
+                             (cos(decr_proj) * cos(sdecr) * cos(srar - rar_proj) + sin(decr_proj) * sin(sdecr));
+                        sy = (sin(decr_proj) * cos(sdecr) * cos(srar - rar_proj) - cos(decr_proj) * sin(sdecr)) /
+                             (cos(decr_proj) * cos(sdecr) * cos(srar - rar_proj) + sin(decr_proj) * sin(sdecr));
 
                         //  now convert to pixels
                         ccdx = pa * sx + pb * sy + pc;
@@ -1356,6 +1437,22 @@ bool CCDSim::ISSnoopDevice(XMLEle * root)
                 return true;
             }
         }
+    }
+    else if (!strcmp(propName, "GEOGRAPHIC_COORD"))
+    {
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            const char * name = findXMLAttValu(ep, "name");
+            if (!strcmp(name, "LAT"))
+                m_SiteLatitude  = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "LONG"))
+                m_SiteLongitude = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "ELEV"))
+                m_SiteAltitude  = atof(pcdataXMLEle(ep));
+        }
+        LOGF_DEBUG("Snooped site location: lat=%f lon=%f alt=%f",
+                   m_SiteLatitude, m_SiteLongitude, m_SiteAltitude);
+        return true;
     }
     // We try to snoop EQPEC first, if not found, we snoop regular EQNP
 #ifdef USE_EQUATORIAL_PE

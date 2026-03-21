@@ -2,8 +2,19 @@
 SET(ccdsimulator_SRC
     ccd_simulator.cpp)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ERFA erfa)
+
 add_executable(indi_simulator_ccd ${ccdsimulator_SRC})
 target_link_libraries(indi_simulator_ccd indidriver)
+if(ERFA_FOUND)
+    message(STATUS "CCD simulator: ERFA found, enabling ERFA-based star positions")
+    target_compile_definitions(indi_simulator_ccd PRIVATE HAVE_ERFA)
+    target_include_directories(indi_simulator_ccd PRIVATE ${ERFA_INCLUDE_DIRS})
+    target_link_libraries(indi_simulator_ccd ${ERFA_LDFLAGS})
+else()
+    message(STATUS "CCD simulator: ERFA not found, using libnova J2000 star positions")
+endif()
 install(TARGETS indi_simulator_ccd RUNTIME DESTINATION bin)
 
 # ########## Guide Simulator ##############

@@ -190,6 +190,12 @@ protected:
     double currentRA { 0 };
     double currentDE { 0 };
     bool usePE { false };
+
+    // Observer location, snooped from mount GEOGRAPHIC_COORD.
+    // Used for ERFA diurnal aberration.  Defaults to Greenwich/sea-level.
+    double m_SiteLatitude  { 0.0 };   // degrees, north positive
+    double m_SiteLongitude { 0.0 };   // degrees, east positive
+    double m_SiteAltitude  { 0.0 };   // metres
     time_t RunStart;
 
     float guideNSOffset {0};
