@@ -182,3 +182,32 @@ install(TARGETS indi_SVD_MathPlugin
     ARCHIVE DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
     LIBRARY DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
     RUNTIME DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
+
+# #################################################
+# ############### SPK math plugin #################
+# #################################################
+set(SPKMathPlugin_SRCS
+    SPKMathPlugin.cpp
+    spk_vtel.c
+    spk_pmfit.c
+    spk_astr.c
+)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ERFA REQUIRED IMPORTED_TARGET erfa)
+
+add_library(indi_SPK_MathPlugin SHARED ${SPKMathPlugin_SRCS})
+target_include_directories(indi_SPK_MathPlugin
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/libs/indicore
+)
+target_link_libraries(indi_SPK_MathPlugin
+    indidriver
+    PkgConfig::ERFA
+    $<$<PLATFORM_ID:CYGWIN>:AlignmentDriver>
+)
+
+install(TARGETS indi_SPK_MathPlugin
+    ARCHIVE DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
+    LIBRARY DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
+    RUNTIME DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
