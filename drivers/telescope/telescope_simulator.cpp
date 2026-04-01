@@ -310,9 +310,10 @@ void ScopeSim::updateCurrentCoordsFromAxes()
         }
         else
         {
-            INDI::IEquatorialCoordinates haCoords{ instHA.Hours(), instDec.Degrees() };
+            double instRA = (alignment.lst() - instHA).Hours();
+            INDI::IEquatorialCoordinates raCoords{ instRA, instDec.Degrees() };
             TelescopeDirectionVector tdv =
-                TelescopeDirectionVectorFromLocalHourAngleDeclination(haCoords);
+                TelescopeDirectionVectorFromEquatorialCoordinates(raCoords);
             corrected = TransformTelescopeToCelestial(tdv, corrRA, corrDec);
         }
         if (corrected)
@@ -564,10 +565,16 @@ bool ScopeSim::Goto(double r, double d)
         TelescopeDirectionVector tdv;
         if (TransformCelestialToTelescope(r, d, 0.0, tdv))
         {
-            INDI::IEquatorialCoordinates haCoords;
-            LocalHourAngleDeclinationFromTelescopeDirectionVector(tdv, haCoords);
-            targetRA  = (alignment.lst() - Angle(haCoords.rightascension, Angle::HOURS)).Hours();
-            targetDec = haCoords.declination;
+            INDI::IEquatorialCoordinates raCoords;
+            EquatorialCoordinatesFromTelescopeDirectionVector(tdv, raCoords);
+            targetRA  = raCoords.rightascension;
+            targetDec = raCoords.declination;
+            LOGF_INFO("EQ Goto: alignment corrected RA %.4fh Dec %.4f -> RA %.4fh Dec %.4f",
+                      r, d, targetRA, targetDec);
+        }
+        else
+        {
+            LOG_WARN("EQ Goto: TransformCelestialToTelescope FAILED, using raw coordinates");
         }
     }
 
@@ -579,9 +586,9 @@ bool ScopeSim::Sync(double ra, double dec)
 {
     // The INDI alignment math plugins encode telescope directions as:
     //   - ALTAZ (ZENITH) mounts: Az/Alt via TelescopeDirectionVectorFromAltitudeAzimuth
-    //   - EQ mounts: HA/Dec via TelescopeDirectionVectorFromLocalHourAngleDeclination
-    // Using the wrong encoding causes the correction to be applied in the wrong coordinate
-    // system, which after Goto's instrumentHaDecToMount re-rotation produces garbage altitudes.
+    //   - EQ mounts: RA/Dec via TelescopeDirectionVectorFromEquatorialCoordinates
+    // Both Sync and Goto must use the same RA-based (ANTI_CLOCKWISE) encoding for EQ,
+    // matching what BuiltIn/SVD/Nearest plugins expect internally.
 
     if (m_MountType == Alignment::MOUNT_TYPE::ALTAZ)
     {
@@ -591,14 +598,16 @@ bool ScopeSim::Sync(double ra, double dec)
     }
     else
     {
-        // EQ mounts: encode the raw encoder HA/Dec as the telescope direction.
+        // EQ mounts: encode instrument RA/Dec as RA-based TDV (ANTI_CLOCKWISE),
+        // matching the convention used by BuiltIn/SVD/Nearest plugins.
         Angle instHA, instDec;
         alignment.mountToInstrumentHaDec(axisPrimary.position, axisSecondary.position,
                                          &instHA, &instDec);
 
-        INDI::IEquatorialCoordinates haCoords{ instHA.Hours(), instDec.Degrees() };
+        double instRA = (alignment.lst() - instHA).Hours();
+        INDI::IEquatorialCoordinates raCoords{ instRA, instDec.Degrees() };
         TelescopeDirectionVector tdv =
-            TelescopeDirectionVectorFromLocalHourAngleDeclination(haCoords);
+            TelescopeDirectionVectorFromEquatorialCoordinates(raCoords);
 
         AlignmentDatabaseEntry entry;
         entry.ObservationJulianDate = ln_get_julian_from_sys();
