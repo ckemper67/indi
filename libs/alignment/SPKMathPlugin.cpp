@@ -5,7 +5,7 @@
 #include <cstring>
 #include "indicom.h"
 #include "libastro.h"
-#include "sofa.h"
+#include "spk/sofa.h"
 #include <libnova/julian_day.h>
 #include <libnova/sidereal_time.h>
 

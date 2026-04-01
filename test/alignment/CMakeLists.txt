@@ -23,14 +23,15 @@ ADD_EXECUTABLE(test_alignment_plugins
     ../../libs/alignment/NearestMathPlugin.cpp
     ../../libs/alignment/BasicMathPlugin.cpp
     ../../libs/alignment/SPKMathPlugin.cpp
-    ../../libs/alignment/spk_vtel.c
-    ../../libs/alignment/spk_pmfit.c
-    ../../libs/alignment/spk_astr.c
+    ../../libs/alignment/spk/vtel.c
+    ../../libs/alignment/spk/pmfit.c
+    ../../libs/alignment/spk/astr.c
     ../../drivers/telescope/scopesim_helper.cpp
 )
 
 TARGET_INCLUDE_DIRECTORIES(test_alignment_plugins PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/alignment
+    ${CMAKE_SOURCE_DIR}/libs/alignment/spk
     ${CMAKE_SOURCE_DIR}/libs/indicore
     ${CMAKE_SOURCE_DIR}/drivers/telescope
 )

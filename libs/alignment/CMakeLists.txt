@@ -188,9 +188,9 @@ install(TARGETS indi_SVD_MathPlugin
 # #################################################
 set(SPKMathPlugin_SRCS
     SPKMathPlugin.cpp
-    spk_vtel.c
-    spk_pmfit.c
-    spk_astr.c
+    spk/vtel.c
+    spk/pmfit.c
+    spk/astr.c
 )
 
 find_package(PkgConfig REQUIRED)
@@ -200,6 +200,7 @@ add_library(indi_SPK_MathPlugin SHARED ${SPKMathPlugin_SRCS})
 target_include_directories(indi_SPK_MathPlugin
     PRIVATE
         ${CMAKE_SOURCE_DIR}/libs/indicore
+        ${CMAKE_CURRENT_SOURCE_DIR}/spk
 )
 target_link_libraries(indi_SPK_MathPlugin
     indidriver

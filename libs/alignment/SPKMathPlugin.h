@@ -1,7 +1,7 @@
 #pragma once
 
 #include "MathPlugin.h"
-#include "spk.h"
+#include "spk/spk.h"
 #include "TelescopeDirectionVectorSupportFunctions.h"
 #include "libastro.h"
 
