@@ -393,8 +393,8 @@ protected:
                                 INDI::IGeographicCoordinates site = kLosAngeles,
                                 ::Alignment::MOUNT_TYPE mountType = ::Alignment::EQ_GEM)
     {
-        double minDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MinDec : kEQ_MinDec;
-        double maxDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MaxDec : kEQ_MaxDec;
+        double minDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MinEl : kEQ_MinDec;
+        double maxDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MaxEl : kEQ_MaxDec;
 
         MountAlignment_t alignment = (mountType == ::Alignment::ALTAZ) ? ZENITH :
                                      site.latitude >= 0 ? NORTH_CELESTIAL_POLE : SOUTH_CELESTIAL_POLE;
@@ -497,7 +497,7 @@ protected:
         double gmst = ln_get_apparent_sidereal_time(fixedJD);
         double lst  = range24(gmst + DEG_TO_HOURS(location.longitude));
 
-        // Use 12 points for alignment in flip tests
+        // Use 3 points for alignment in flip tests
         HaltonSequence alignSeq(2, 3);
         for (int i = 1; i <= 3; ++i)
         {
@@ -894,7 +894,7 @@ TEST_F(AlignmentPluginTest, SVD_AlignValidate_Equatorial)
 TEST_F(AlignmentPluginTest, Test_SPK_ErrorRecovery)
 {
     SPKMathPlugin plugin;
-    // SPK/Pmfit usually needs more points for a robust fit, let's give it 10.
+    // 10 points gives Pmfit a well-conditioned full 6-term fit (nt=6, 14 DoF).
     RunPluginAllInAlignment(plugin, {.ma = ARCMIN_TO_DEG(10), .me = ARCMIN_TO_DEG(5)}, 10);
 }
 
@@ -907,16 +907,16 @@ TEST_F(AlignmentPluginTest, Test_SPK_AltAz)
 TEST_F(AlignmentPluginTest, Test_SPK_SouthernHemisphere)
 {
     SPKMathPlugin plugin;
-    // Test NCP recovery in Hobart
     RunPluginAllInAlignment(plugin, {.ma = ARCMIN_TO_DEG(10), .me = ARCMIN_TO_DEG(5)}, 10, kSydney);
 }
 
 // ---------------------------------------------------------------------------
 // SPK -- AlignValidate suite (equatorial mounts)
 //
-// SPKMathPlugin fits a 6-term Wallace pointing model (IH, ID, CH, ME, MA, TF)
+// SPKMathPlugin fits a 6-term Wallace pointing model (IH, ID, ME, MA, CH, TF)
 // via Pmfit.  NP is excluded (IA, NP, CA are correlated; negligible in
-// well-built mounts).
+// well-built mounts).  Polar-axis terms (ME, MA) precede collimation (CH) so
+// that a 3-point fit yields a well-conditioned 4-term polar solution.
 //
 // TF (tube flexure) requires a two-pass AXES call: the first pass gives the
 // initial encoder demand, the second re-evaluates at that position so the
@@ -932,7 +932,9 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_Polar)
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_AxisErrors)
 {
     SPKMathPlugin plugin;
-    RunPluginAlignValidate(plugin, {.ih = ARCMIN_TO_DEG(5), .id = ARCMIN_TO_DEG(3), .ch = ARCMIN_TO_DEG(8)}, 3, 100, 1.0);
+    // IH and ID are terms 0-1 and are fitted even at 3 points.  CH is term 4
+    // and requires 5+ points; it is tested separately in SPK_AlignValidate_CHOnly.
+    RunPluginAlignValidate(plugin, {.ih = ARCMIN_TO_DEG(5), .id = ARCMIN_TO_DEG(3)}, 3, 100, 1.0);
 }
 
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_IHOnly)
@@ -944,13 +946,13 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_IHOnly)
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_CHOnly)
 {
     SPKMathPlugin plugin;
-    RunPluginAlignValidate(plugin, {.ch = ARCMIN_TO_DEG(20)}, 3, 100, 1.0);
+    // CH is term 4 (IH, ID, ME, MA, CH, TF); Pmfit fits terms 0..nt-1 where 5+ points yields nt=5.
+    RunPluginAlignValidate(plugin, {.ch = ARCMIN_TO_DEG(20)}, 5, 100, 1.0);
 }
 
-// NP (roll/pitch nonperpendicularity) is not fitted by Pmfit (IA, NP, CA are
-// correlated; NP excluded for robustness).  pnp stays 0.  The round-trip is
-// machine-epsilon because the two-pass AXES refinement ensures the VD
-// correction is consistent with TARG, and pnp=0 cancels exactly.
+// NP (non-perpendicularity of the RA and Dec axes) is not fitted by Pmfit;
+// the NP-induced pointing offset is partially absorbed by the fitted terms
+// (IH, ID, ME, MA), keeping the residual within tolerance at small NP values.
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_NonPerp)
 {
     SPKMathPlugin plugin;
@@ -977,8 +979,8 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_MEOnly)
     RunPluginAlignValidate(plugin, {.me = ARCMIN_TO_DEG(5)}, 3, 100, 1.0);
 }
 
-// Zero-error baseline: computePeakError() returns 0, tolerance clamps to kTolFloorArcsec (20").
-// The model should converge to near-zero corrections and act as an identity transform.
+// Zero-error baseline: with no mount errors injected, the model should produce
+// near-zero corrections and behave as an identity transform.
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_NoErrors)
 {
     SPKMathPlugin plugin;
@@ -1067,15 +1069,15 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_EqFork_Southern)
 // SPK -- Minimal sync point boundary tests
 // ---------------------------------------------------------------------------
 
-// 6 alignment points: exactly determined for a 6-term fit.
+// 6 alignment points: full 6-term fit with 6 DoF.  Tests the 6+ sync-point path.
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_MinimalPoints_6)
 {
     SPKMathPlugin plugin;
-    RunPluginAlignValidate(plugin, kMixed, 3, 100, 1.0);
+    RunPluginAlignValidate(plugin, kMixed, 6, 100, 1.0);
 }
 
-// 2 alignment points: 4 terms fitted (IA, IB, CA + one axis error), zero DoF.
-// Exercises the outTermCount=4 path in BuildObservationData.
+// 2 alignment points: 2 terms fitted (IH, ID — index errors only), zero DoF.
+// Exercises the outTermCount=2 path in BuildObservationData.
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_MinimalPoints_2)
 {
     SPKMathPlugin plugin;
@@ -1090,8 +1092,8 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_MinimalPoints_1)
     RunPluginAllInAlignment(plugin, {.ih = ARCMIN_TO_DEG(5)}, 1);
 }
 
-// 3 alignment points: exactly determined (6 observations for 6 terms).
-// Pure polar errors injected so the fit is well-conditioned with few points.
+// 3 alignment points: 4 terms fitted (IH, ID, ME, MA), 2 DoF.
+// Pure polar errors (MA, ME) are fully recoverable with this minimal set.
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_MinimalPoints_3)
 {
     SPKMathPlugin plugin;
@@ -1123,7 +1125,8 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_AltAz_Polar)
 TEST_F(AlignmentPluginTest, SPK_AlignValidate_AltAz_AxisErrors)
 {
     SPKMathPlugin plugin;
-    RunPluginAlignValidate(plugin, {.ih = ARCMIN_TO_DEG(5), .id = ARCMIN_TO_DEG(3), .ch = ARCMIN_TO_DEG(8)}, 3, 100, 1.0,
+    // IA and IE are terms 0-1 and are fitted at 3 points.
+    RunPluginAlignValidate(plugin, {.ih = ARCMIN_TO_DEG(5), .id = ARCMIN_TO_DEG(3)}, 3, 100, 1.0,
                            kLosAngeles, ::Alignment::ALTAZ);
 }
 
@@ -1157,8 +1160,8 @@ TEST_F(AlignmentPluginTest, SPK_AlignValidate_AltAz_Southern)
 // directly measures generalization accuracy rather than round-trip consistency.
 //
 // Expected behavior:
-//   - 3 pts: both SVD and SPK have zero or negative degrees of freedom for
-//     the noise realization, so residuals are large and comparable.
+//   - 3 pts: SPK fits 4 terms (IH, ID, ME, MA) with 2 DoF; SVD is near
+//     determined.  Residuals are larger than at 12 pts.
 //   - 12 pts: SPK's 6-term systematic model has 18 DoF to average down noise;
 //     SVD's general linear fit has more free parameters and averages less.
 //     SPK should show lower residuals at new sky positions.

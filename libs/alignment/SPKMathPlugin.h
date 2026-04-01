@@ -33,7 +33,7 @@ class SPKMathPlugin : public MathPlugin, public TelescopeDirectionVectorSupportF
         spkPO m_PO;
 
         void UpdateObsConfig();
-        void UpdateAstrometry(double JulianOffset);
+        void UpdateAstrometry(double JD);
 
         std::vector<double> BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, int &outTermCount);
         void ParsePmfitCoefficients(const double pmv[6], int terms);
