@@ -555,6 +555,75 @@ protected:
         EXPECT_LT(stats.p95, targetRMSArcsec * 1.5)
             << "Plugin failed meridian flip P95 quality target " << targetRMSArcsec * 1.5 << "\"";
     }
+
+    // -----------------------------------------------------------------------
+    // Incremental hot-path helpers
+    // -----------------------------------------------------------------------
+
+    // Build a database of n sync points, initialise plugin, and return the
+    // generator so the caller can add more points with the same sequence.
+    ::Alignment buildIncrementalDb(SPKMathPlugin &plugin,
+                                   const MountErrors &errors,
+                                   int n,
+                                   InMemoryDatabase &db,
+                                   ::Alignment::MOUNT_TYPE mountType = ::Alignment::EQ_GEM,
+                                   INDI::IGeographicCoordinates site = kLosAngeles)
+    {
+        db.SetDatabaseReferencePosition(site);
+        MountAlignment_t alignment = (mountType == ::Alignment::ALTAZ) ? ZENITH :
+                                     site.latitude >= 0 ? NORTH_CELESTIAL_POLE
+                                                        : SOUTH_CELESTIAL_POLE;
+        plugin.SetApproximateMountAlignment(alignment);
+
+        ::Alignment generator = makeGenerator(errors, site, mountType);
+        auto *pSupport = dynamic_cast<TelescopeDirectionVectorSupportFunctions *>(&plugin);
+
+        double gmst  = ln_get_apparent_sidereal_time(fixedJD);
+        double lst   = range24(gmst + DEG_TO_HOURS(site.longitude));
+        double minDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MinEl : kEQ_MinDec;
+        double maxDec = (mountType == ::Alignment::ALTAZ) ? kAZ_MaxEl : kEQ_MaxDec;
+
+        HaltonSequence seq(2, 3);
+        for (int i = 1; i <= n; i++)
+        {
+            double ra, dec;
+            auto raw = seq.getRaw(i);
+            getSkyPoint(raw.first, raw.second, minDec, maxDec, ra, dec);
+            AlignmentDatabaseEntry entry;
+            buildEntry(generator, pSupport, ra, dec, lst, mountType, entry);
+            db.GetAlignmentDatabase().push_back(entry);
+        }
+        EXPECT_TRUE(plugin.Initialise(&db));
+        return generator;
+    }
+
+    // Verify hot-path result matches a cold-initialised reference plugin.
+    void verifyHotMatchesCold(SPKMathPlugin &hotPlugin, SPKMathPlugin &coldPlugin,
+                               ::Alignment::MOUNT_TYPE mountType = ::Alignment::EQ_GEM)
+    {
+        double joff = fixedJD - ln_get_julian_from_sys();
+        // Hot path uses pm=0 as the linearization point (Pmfit iteration-0);
+        // Pmfit iterates to convergence.  With arcminute-level mount errors
+        // the difference is a few arcseconds in angle space (~5e-5 in
+        // direction vector units), well below observational noise.
+        const double tol = 5e-5;
+        for (double testRA : {3.0, 8.0, 15.0, 21.0})
+        {
+            // Clamp to physical range: equatorial [-60, 70], AltAz [20, 85]
+            std::vector<double> decs = (mountType == ::Alignment::ALTAZ)
+                ? std::vector<double>{25.0, 40.0, 60.0, 80.0}
+                : std::vector<double>{-30.0, 0.0, 30.0, 60.0};
+            for (double testDec : decs)
+            {
+                TelescopeDirectionVector hotV, coldV;
+                ASSERT_TRUE(hotPlugin.TransformCelestialToTelescope(testRA, testDec, joff, hotV));
+                ASSERT_TRUE(coldPlugin.TransformCelestialToTelescope(testRA, testDec, joff, coldV));
+                EXPECT_NEAR(hotV.x, coldV.x, tol) << "RA=" << testRA << " Dec/El=" << testDec;
+                EXPECT_NEAR(hotV.y, coldV.y, tol) << "RA=" << testRA << " Dec/El=" << testDec;
+                EXPECT_NEAR(hotV.z, coldV.z, tol) << "RA=" << testRA << " Dec/El=" << testDec;
+            }
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -1191,6 +1260,122 @@ TEST_F(AlignmentPluginTest, NoiseStress_SVD_12pts)
 {
     SVDMathPlugin noisyPlugin, refPlugin;
     RunPluginNoiseValidate(noisyPlugin, refPlugin, kMixed, 12, 100, kNoiseSigma30arcsec, 120.0);
+}
+
+// ---------------------------------------------------------------------------
+// SPK incremental hot-path tests
+//
+// Each test cold-initialises a plugin with 6 sync points (which builds the
+// NE accumulator at nt=6), adds one more point, and verifies the hot-path
+// result matches a fresh cold-initialised plugin with all 7 points.
+// ---------------------------------------------------------------------------
+
+TEST_F(AlignmentPluginTest, SPK_Incremental_MatchesCold_Equatorial)
+{
+    InMemoryDatabase db;
+    SPKMathPlugin hotPlugin;
+    auto generator = buildIncrementalDb(hotPlugin, kMixed, 6, db);
+
+    auto *pSupport = dynamic_cast<TelescopeDirectionVectorSupportFunctions *>(&hotPlugin);
+    double gmst = ln_get_apparent_sidereal_time(fixedJD);
+    double lst  = range24(gmst + DEG_TO_HOURS(kLosAngeles.longitude));
+    {
+        double ra, dec;
+        auto raw = HaltonSequence(2, 3).getRaw(7);
+        getSkyPoint(raw.first, raw.second, kEQ_MinDec, kEQ_MaxDec, ra, dec);
+        AlignmentDatabaseEntry entry;
+        buildEntry(generator, pSupport, ra, dec, lst, ::Alignment::EQ_GEM, entry);
+        db.GetAlignmentDatabase().push_back(entry);
+    }
+    ASSERT_TRUE(hotPlugin.Initialise(&db));
+
+    SPKMathPlugin coldPlugin;
+    coldPlugin.SetApproximateMountAlignment(NORTH_CELESTIAL_POLE);
+    ASSERT_TRUE(coldPlugin.Initialise(&db));
+
+    verifyHotMatchesCold(hotPlugin, coldPlugin);
+}
+
+TEST_F(AlignmentPluginTest, SPK_Incremental_MatchesCold_AltAz)
+{
+    InMemoryDatabase db;
+    SPKMathPlugin hotPlugin;
+    auto generator = buildIncrementalDb(hotPlugin, kMixed, 6, db, ::Alignment::ALTAZ);
+
+    auto *pSupport = dynamic_cast<TelescopeDirectionVectorSupportFunctions *>(&hotPlugin);
+    double gmst = ln_get_apparent_sidereal_time(fixedJD);
+    double lst  = range24(gmst + DEG_TO_HOURS(kLosAngeles.longitude));
+    {
+        double ra, dec;
+        auto raw = HaltonSequence(2, 3).getRaw(7);
+        getSkyPoint(raw.first, raw.second, kAZ_MinEl, kAZ_MaxEl, ra, dec);
+        AlignmentDatabaseEntry entry;
+        buildEntry(generator, pSupport, ra, dec, lst, ::Alignment::ALTAZ, entry);
+        db.GetAlignmentDatabase().push_back(entry);
+    }
+    ASSERT_TRUE(hotPlugin.Initialise(&db));
+
+    SPKMathPlugin coldPlugin;
+    coldPlugin.SetApproximateMountAlignment(ZENITH);
+    ASSERT_TRUE(coldPlugin.Initialise(&db));
+
+    verifyHotMatchesCold(hotPlugin, coldPlugin, ::Alignment::ALTAZ);
+}
+
+TEST_F(AlignmentPluginTest, SPK_Incremental_InvalidStateNotUsed)
+{
+    // With fewer than 6 points (m_NE_valid=false), adding a 6th must take the
+    // cold path (which then builds the NE accumulator).  A subsequent 7th
+    // point should use the hot path and produce a sensible result.
+    InMemoryDatabase db;
+    SPKMathPlugin plugin;
+    auto generator = buildIncrementalDb(plugin, kMixed, 5, db);
+
+    auto *pSupport = dynamic_cast<TelescopeDirectionVectorSupportFunctions *>(&plugin);
+    double gmst = ln_get_apparent_sidereal_time(fixedJD);
+    double lst  = range24(gmst + DEG_TO_HOURS(kLosAngeles.longitude));
+
+    for (int i : {6, 7})
+    {
+        double ra, dec;
+        auto raw = HaltonSequence(2, 3).getRaw(i);
+        getSkyPoint(raw.first, raw.second, kEQ_MinDec, kEQ_MaxDec, ra, dec);
+        AlignmentDatabaseEntry entry;
+        buildEntry(generator, pSupport, ra, dec, lst, ::Alignment::EQ_GEM, entry);
+        db.GetAlignmentDatabase().push_back(entry);
+        ASSERT_TRUE(plugin.Initialise(&db));
+    }
+
+    double joff = fixedJD - ln_get_julian_from_sys();
+    TelescopeDirectionVector v;
+    ASSERT_TRUE(plugin.TransformCelestialToTelescope(12.0, 45.0, joff, v));
+    double outRA, outDec;
+    plugin.TransformTelescopeToCelestial(v, outRA, outDec, joff);
+    EXPECT_NEAR(12.0, outRA,  kRoundTripTolHours);
+    EXPECT_NEAR(45.0, outDec, kRoundTripTolDeg);
+}
+
+TEST_F(AlignmentPluginTest, SPK_Incremental_MountTypeChange)
+{
+    // Cold-init equatorial (m_NE_mountChar='E').  Switch to AltAz.  The
+    // mountChar mismatch must force the cold path on the next Initialise call.
+    InMemoryDatabase db;
+    SPKMathPlugin plugin;
+    buildIncrementalDb(plugin, kMixed, 6, db);
+
+    plugin.SetApproximateMountAlignment(ZENITH);
+
+    InMemoryDatabase dbAz;
+    auto generatorAz = buildIncrementalDb(plugin, kMixed, 7, dbAz, ::Alignment::ALTAZ);
+    (void)generatorAz;
+
+    double joff = fixedJD - ln_get_julian_from_sys();
+    TelescopeDirectionVector v;
+    ASSERT_TRUE(plugin.TransformCelestialToTelescope(12.0, 60.0, joff, v));
+    double outRA, outDec;
+    plugin.TransformTelescopeToCelestial(v, outRA, outDec, joff);
+    EXPECT_NEAR(12.0, outRA,  kRoundTripTolHours);
+    EXPECT_NEAR(60.0, outDec, kRoundTripTolDeg);
 }
 
 int main(int argc, char **argv)

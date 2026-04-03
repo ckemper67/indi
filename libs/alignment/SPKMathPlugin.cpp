@@ -45,6 +45,12 @@ SPKMathPlugin::SPKMathPlugin()
     
     m_Opt.fl = 1000.0; // Default fl
     m_Opt.wl = 0.55;   // Default wavelength
+
+    memset(m_NE_A, 0, sizeof(m_NE_A));
+    memset(m_NE_v, 0, sizeof(m_NE_v));
+    m_NE_n         = 0;
+    m_NE_mountChar = 0;
+    m_NE_valid     = false;
 }
 
 SPKMathPlugin::~SPKMathPlugin()
@@ -58,29 +64,74 @@ bool SPKMathPlugin::Initialise(InMemoryDatabase *pInMemoryDatabase)
 
     UpdateObsConfig();
 
-    // Collect sync points from database
     InMemoryDatabase::AlignmentDatabaseType &syncPoints = pInMemoryDatabase->GetAlignmentDatabase();
+    int  n         = static_cast<int>(syncPoints.size());
+    char mountChar = (m_Obs.mount == ALTAZ) ? 'A' : 'E';
 
-    if (syncPoints.size() < 1)
+    if (n < 1) return false;
+
+    // Hot path: full 6-term model already fitted, exactly one new point added,
+    // same mount type.
+    if (m_NE_valid &&
+        n         == m_NE_n + 1 &&
+        mountChar == m_NE_mountChar)
     {
-        return false;
+        double oblon, oblat, rdem, pdem;
+        if (ExtractObsRow(syncPoints.back(), oblon, oblat, rdem, pdem) &&
+            AccumulateObsRow(oblon, oblat, rdem, pdem))
+        {
+            double pmv[6];
+            if (SolveNormalEquations(pmv))
+            {
+                m_NE_n = n;
+                ParsePmfitCoefficients(pmv, 6);
+                return true;
+            }
+        }
+        // Fall through to cold path on any failure.
     }
 
-    // Build observation data and determine the number of terms
+    // Cold path: full Pmfit rebuild.
     int nt = 0;
     std::vector<double> obsData = BuildObservationData(syncPoints, nt);
 
     double pmv[6], pms[6], skysig;
-    char mountChar = (m_Obs.mount == ALTAZ) ? 'A' : 'E';
-    int js = Pmfit(m_Obs.slat, mountChar, syncPoints.size(), obsData.data(), nt, pmv, pms, &skysig);
-
-    if (js == 0)
+    int js = Pmfit(m_Obs.slat, mountChar, n, obsData.data(), nt, pmv, pms, &skysig);
+    if (js != 0)
     {
-        ParsePmfitCoefficients(pmv, nt);
-        return true;
+        m_NE_valid = false;
+        return false;
     }
 
-    return false;
+    ParsePmfitCoefficients(pmv, nt);
+
+    // If we have a full 6-term model, build the NE accumulator so subsequent
+    // single-point additions can use the hot path.
+    if (nt == 6)
+    {
+        m_NE_mountChar = mountChar;
+        memset(m_NE_A, 0, sizeof(m_NE_A));
+        memset(m_NE_v, 0, sizeof(m_NE_v));
+        m_NE_valid = true;
+
+        for (const auto &point : syncPoints)
+        {
+            double oblon, oblat, rdem, pdem;
+            if (!ExtractObsRow(point, oblon, oblat, rdem, pdem) ||
+                !AccumulateObsRow(oblon, oblat, rdem, pdem))
+            {
+                m_NE_valid = false;
+                break;
+            }
+        }
+        m_NE_n = m_NE_valid ? n : 0;
+    }
+    else
+    {
+        m_NE_valid = false;
+    }
+
+    return true;
 }
 
 bool SPKMathPlugin::TransformCelestialToTelescope(const double RightAscension, const double Declination,
@@ -195,6 +246,79 @@ void SPKMathPlugin::UpdateAstrometry(double JD)
     m_Ast.astrom.eral = iauAnp(lst_rad + m_Ast.eo);
 }
 
+
+bool SPKMathPlugin::ExtractObsRow(const AlignmentDatabaseEntry &point,
+                                   double &oblon, double &oblat,
+                                   double &rdem,  double &pdem)
+{
+    UpdateAstrometry(point.ObservationJulianDate);
+
+    double gmst_hrs  = ln_get_apparent_sidereal_time(point.ObservationJulianDate);
+    double lst_hrs   = range24(gmst_hrs + RAD_TO_HOURS(m_Obs.slon));
+    double obslon_ha = HOURS_TO_RAD(get_local_hour_angle(lst_hrs, point.RightAscension));
+    double obslat_   = DEG_TO_RAD(point.Declination);
+
+    double roll, pitch;
+    DirectionVectorToRollPitch(point.TelescopeDirection, roll, pitch);
+
+    if (m_Obs.mount == ALTAZ)
+    {
+        double az_cel, el_cel;
+        iauHd2ae(obslon_ha, obslat_, m_Obs.slat, &az_cel, &el_cel);
+        oblon = az_cel;
+        oblat = el_cel;
+        rdem  = iauAnp(-roll);
+    }
+    else
+    {
+        oblon = obslon_ha;
+        oblat = obslat_;
+        rdem  = -roll;
+    }
+    pdem = pitch;
+    return true;
+}
+
+bool SPKMathPlugin::AccumulateObsRow(double oblon, double oblat,
+                                      double rdem,  double pdem)
+{
+    // Bfun is evaluated at the celestial (observed) coordinates, matching
+    // Pmfit's accumulation pass.  xi/eta are the residuals with pm=0
+    // (encoder demand = rdem/pdem), which is Pmfit iteration-0.
+    double bf[12]; // 2 * 6 terms
+    char mountChar = (m_Obs.mount == ALTAZ) ? 'A' : 'E';
+    if (Bfun(6, m_Obs.slat, mountChar, oblon, oblat, bf) != 0)
+        return false;
+
+    double xi  = iauAnpm(oblon - rdem) * cos(oblat);
+    double eta = iauAnpm(oblat - pdem);
+
+    for (int i = 0; i < 6; i++)
+    {
+        double bfi0 = bf[i*2 + 0];
+        double bfi1 = bf[i*2 + 1];
+        m_NE_v[i] += bfi0 * xi + bfi1 * eta;
+        for (int j = 0; j < 6; j++)
+            m_NE_A[i*6 + j] += bfi0 * bf[j*2 + 0] + bfi1 * bf[j*2 + 1];
+    }
+    return true;
+}
+
+bool SPKMathPlugin::SolveNormalEquations(double pmv[6])
+{
+    // Copy both arrays: Simeqn overwrites in-place, but we need to keep the
+    // accumulators intact for future incremental additions.
+    double Acopy[36];
+    double vcopy[6];
+    memcpy(Acopy, m_NE_A, sizeof(m_NE_A));
+    memcpy(vcopy, m_NE_v, sizeof(m_NE_v));
+
+    if (Simeqn(6, Acopy, vcopy) != 0)
+        return false;
+
+    memcpy(pmv, vcopy, 6 * sizeof(double));
+    return true;
+}
 
 std::vector<double> SPKMathPlugin::BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, int &outTermCount)
 {
