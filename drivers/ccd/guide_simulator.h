@@ -72,6 +72,7 @@ class GuideSim : public SimulatorBase
 
         int DrawCcdFrame(INDI::CCDChip *targetChip);
 
+
         virtual IPState GuideNorth(uint32_t) override;
         virtual IPState GuideSouth(uint32_t) override;
         virtual IPState GuideEast(uint32_t) override;
@@ -86,9 +87,10 @@ class GuideSim : public SimulatorBase
         virtual bool StartStreaming() override;
         virtual bool StopStreaming() override;
 
-    private:
-
+        // Exposed for unit tests; populates members from SimulatorSettingsNP.
         bool SetupParms();
+
+    private:
 
         // Turns on/off Bayer RGB simulation.
         void setRGB(bool onOff);
@@ -115,6 +117,8 @@ class GuideSim : public SimulatorBase
         // Without a rotator device ("Manual Rotator") the rotator angle is
         // considered fixed to 0° and the camera rotation is equal to offset
         float m_RotationOffset { 0 };
+        // Camera rotation (radians) lives on SimulatorBase so DrawImageStar reads
+        // the same value DrawCcdFrame writes; do not redeclare it here.
 
         bool m_SimulateRGB { false };
 

@@ -2,8 +2,17 @@
 #include <cmath>
 #include <sys/time.h>
 
+// Central wavelength used for diffraction-floor FWHM calculation (mm).
+static constexpr float kCenterWavelengthMM = 550e-6f;
+
+// Minimum aperture accepted for diffraction calculations (mm).
+// Values below this produce nonphysical PSF widths and are treated as "unknown".
+static constexpr float kMinApertureMM = 5.0f;
+
 double SimulatorBase::flux(double mag) const
 {
+    if (m_LimitingMag == m_SaturationMag)
+        return 1.0;
     double const z = m_LimitingMag;
     double const k = 2.5 * log10(m_MaxVal) / (m_LimitingMag - m_SaturationMag);
     return pow(10, (z - mag) * k / 2.5);
@@ -11,6 +20,11 @@ double SimulatorBase::flux(double mag) const
 
 int SimulatorBase::DrawImageStar(INDI::CCDChip *targetChip, float mag, float x, float y, float exposure_time)
 {
+    // #20: guard against uninitialized image scale (causes division by zero below).
+    if (m_ImageScaleX <= 0.0f || m_ImageScaleY <= 0.0f ||
+        !std::isfinite(m_ImageScaleX) || !std::isfinite(m_ImageScaleY))
+        return 0;
+
     int drew = 0;
 
     int const subX = targetChip->getSubX();
@@ -18,37 +32,209 @@ int SimulatorBase::DrawImageStar(INDI::CCDChip *targetChip, float mag, float x, 
     int const subW = targetChip->getSubW() + subX;
     int const subH = targetChip->getSubH() + subY;
 
-    if ((x < subX) || (x > subW) || (y < subY) || (y > subH))
+    // #18: allow stars whose centers are slightly outside the frame -- their halo
+    // and diffraction spikes can still illuminate the sensor. AddToPixel clips every
+    // write to the subframe, so over-shooting is safe.
+    static constexpr float kMaxStarInfluencePx = 100.0f;
+    if (x < subX - kMaxStarInfluencePx || x > subW + kMaxStarInfluencePx ||
+        y < subY - kMaxStarInfluencePx || y > subH + kMaxStarInfluencePx)
         return 0;
 
-    float const totalFlux = static_cast<float>(flux(mag) * exposure_time);
+    // Aperture: prefer the manual ScopeInfoNP entry; fall back to the aperture
+    // snooped from the connected telescope via INDI::CCD::ISSnoopDevice.
+    // Flux scales as (D / m_RefApertureMM)^2 so larger scopes collect more light.
+    double const apertureMM = ScopeInfoNP[APERTURE].getValue() > 0
+                                  ? ScopeInfoNP[APERTURE].getValue()
+                                  : snoopedAperture;
+    float const apertureScale = (!std::isnan(apertureMM) && apertureMM > 0.0)
+                                    ? static_cast<float>((apertureMM / m_RefApertureMM) * (apertureMM / m_RefApertureMM))
+                                    : 1.0f;
 
-    int const boxsizey = static_cast<int>(3.0f * m_Seeing / m_ImageScaleY) + 1;
+    float const totalFlux = static_cast<float>(flux(mag) * exposure_time * apertureScale);
 
-    // Gaussian PSF: f(r) = 1/(sigma*sqrt(2*pi)) * exp(-r^2 / (2*sigma^2))
-    // sigma relates to FWHM by: FWHM = 2*sqrt(2*ln2)*sigma
-    float const sigma = m_Seeing / (2.0f * std::sqrt(2.0f * std::log(2.0f)));
+    float const pixel_area = m_ImageScaleX * m_ImageScaleY;
 
+    if (!std::isfinite(pixel_area) || pixel_area <= 0.0f)
+        return 0;
+
+    // Moffat profile: f(r) = (beta-1)/(pi*alpha^2) * (1 + r^2/alpha^2)^(-beta)
+    // FWHM_total^2 = FWHM_seeing^2 + (1.22*lambda/D * 206265)^2  (diffraction floor)
+    float const beta     = 2.5f;
+    float const betaTerm = 4.0f * (std::pow(2.0f, 1.0f / beta) - 1.0f);
+
+    float fwhm2 = m_Seeing * m_Seeing;
+    // #4: clamp aperture to kMinApertureMM before computing diffraction floor to
+    // prevent 1/aperture blowing up for unphysically small values.
+    if (!std::isnan(apertureMM) && apertureMM >= kMinApertureMM)
+    {
+        float const fwhm_diff = 1.22f * kCenterWavelengthMM / static_cast<float>(apertureMM) * 206265.0f;
+        fwhm2 += fwhm_diff * fwhm_diff;
+    }
+
+    // Floor fwhm2 at one-pixel FWHM so a saved config with SIM_SEEING=0 (or any
+    // path that leaves m_Seeing<=0/NaN without an aperture diffraction floor)
+    // still renders a star instead of producing NaN Moffat pixels.
+    float const minFwhm  = std::min(m_ImageScaleX, m_ImageScaleY);
+    float const minFwhm2 = minFwhm * minFwhm;
+    if (!std::isfinite(fwhm2) || fwhm2 < minFwhm2)
+        fwhm2 = minFwhm2;
+
+    float const alpha2     = fwhm2 / betaTerm;
+    float const moffatNorm = (beta - 1.0f) / (float(M_PI) * alpha2);
+
+    // Compute rendering radius analytically: solve moffat(r)*totalFlux*pixel_area = 0.5 ADU.
+    float const threshold = std::max(moffatNorm * totalFlux * pixel_area * 2.0f, 1.0f);
+    float const r2_max    = alpha2 * (std::pow(threshold, 1.0f / beta) - 1.0f);
+    int   const moffatBox = (r2_max > 0.0f)
+                                ? static_cast<int>(std::sqrt(r2_max) / std::min(m_ImageScaleX, m_ImageScaleY)) + 1
+                                : static_cast<int>(3.0f * m_Seeing / std::min(m_ImageScaleX, m_ImageScaleY)) + 1;
+    // Hard cap: 40 pixels captures >99.9% of Moffat energy at beta=2.5.
+    static constexpr int maxRenderBox = 40;
+    int const boxsizey = std::min(moffatBox, maxRenderBox);
+
+    float const fracX = x - std::floor(x);
+    float const fracY = y - std::floor(y);
+    int   const ix    = static_cast<int>(std::floor(x));
+    int   const iy    = static_cast<int>(std::floor(y));
+
+    int const box2 = boxsizey * boxsizey;
     for (int sy = -boxsizey; sy <= boxsizey; sy++)
     {
         for (int sx = -boxsizey; sx <= boxsizey; sx++)
         {
-            float const dc2 = sx * sx * m_ImageScaleX * m_ImageScaleX
-                            + sy * sy * m_ImageScaleY * m_ImageScaleY;
-            float const fa  = (1.0f / (sigma * std::sqrt(2.0f * float(M_PI))))
-                            * std::exp(-dc2 / (2.0f * sigma * sigma));
-            int const fp = static_cast<int>(fa * totalFlux);
+            if (sx * sx + sy * sy > box2)
+                continue;
+            float const dx  = (sx - fracX) * m_ImageScaleX;
+            float const dy  = (sy - fracY) * m_ImageScaleY;
+            float const dc2 = dx * dx + dy * dy;
+            float const moffat = moffatNorm * std::pow(1.0f + dc2 / alpha2, -beta);
+            int   const fp     = static_cast<int>(moffat * totalFlux * pixel_area);
             if (fp > 0)
             {
-                if (AddToPixel(targetChip, static_cast<int>(x) + sx,
-                               static_cast<int>(y) + sy, fp) != 0)
+                if (AddToPixel(targetChip, ix + sx, iy + sy, fp) != 0)
                     drew = 1;
             }
         }
     }
+
+    // Isotropic 1/r^2 scattered-light halo for bright stars.
+    static constexpr float haloNorm = 1e-3f;
+    float const haloCoeff = haloNorm * totalFlux;
+    if (haloCoeff >= 1.0f)
+    {
+        int const maxHaloR = static_cast<int>(std::sqrt(haloCoeff)) + 1;
+        for (int sy = -maxHaloR; sy <= maxHaloR; sy++)
+        {
+            for (int sx = -maxHaloR; sx <= maxHaloR; sx++)
+            {
+                float const r2 = static_cast<float>(sx * sx + sy * sy);
+                if (r2 < 1.0f)
+                    continue;
+                int const adu = static_cast<int>(haloCoeff / r2);
+                if (adu < 1)
+                    continue;
+                AddToPixel(targetChip, ix + sx, iy + sy, adu);
+            }
+        }
+    }
+
+    // Saturation blooming: bleed columns inside the bright PSF core (~3x FWHM radius).
+    int const bleedBox = static_cast<int>(3.0f * m_Seeing / std::min(m_ImageScaleX, m_ImageScaleY)) + 1;
+    for (int sx = -bleedBox; sx <= bleedBox; sx++)
+        BleedColumn(targetChip, ix + sx, iy);
+
+    // Diffraction spikes: only for scopes with secondary mirror spider vanes (reflectors).
+    // Models a four-vane Newtonian-style spider; vane angle follows m_CameraTheta.
+    if (m_DiffractionSpikes && totalFlux > 500.0f)
+    {
+        float const spikeCoeff = 0.0002f * totalFlux;
+        int   const maxDist    = std::max(targetChip->getSubW(), targetChip->getSubH());
+        float const cosT = std::cos(static_cast<float>(m_CameraTheta));
+        float const sinT = std::sin(static_cast<float>(m_CameraTheta));
+        for (int d = 1; d <= maxDist; d++)
+        {
+            int const adu = static_cast<int>(spikeCoeff / (d * d));
+            if (adu < 1)
+                break;
+            float const fd = static_cast<float>(d);
+            int const dx1 = static_cast<int>(std::round(fd * cosT));
+            int const dy1 = static_cast<int>(std::round(fd * sinT));
+            AddToPixel(targetChip, ix + dx1, iy + dy1, adu);
+            AddToPixel(targetChip, ix - dx1, iy - dy1, adu);
+            int const dx2 = static_cast<int>(std::round(-fd * sinT));
+            int const dy2 = static_cast<int>(std::round( fd * cosT));
+            AddToPixel(targetChip, ix + dx2, iy + dy2, adu);
+            AddToPixel(targetChip, ix - dx2, iy - dy2, adu);
+        }
+    }
+
     return drew;
 }
 
+// #8: BleedColumn propagates overflow above m_MaxVal bidirectionally.
+// AddToPixel allows pixel values up to uint16_t max (65535) so that this
+// function can see and redistribute the excess above the saturation floor.
+void SimulatorBase::BleedColumn(INDI::CCDChip *targetChip, int cx, int cy)
+{
+    int const nwidth  = targetChip->getSubW();
+    int const nheight = targetChip->getSubH();
+    int const ix      = cx - targetChip->getSubX();
+    int const iy      = cy - targetChip->getSubY();
+
+    if (ix < 0 || ix >= nwidth || iy < 0 || iy >= nheight)
+        return;
+
+    uint16_t *buf    = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
+    uint16_t *center = buf + iy * nwidth + ix;
+
+    if (static_cast<int>(*center) <= m_MaxVal)
+        return;
+
+    // Split overflow equally: odd ADU goes upward.
+    int const total = static_cast<int>(*center) - m_MaxVal;
+    *center = static_cast<uint16_t>(m_MaxVal);
+
+    // Drain upward (toward row 0), carrying ceil(total/2).
+    int carry = (total + 1) / 2;
+    for (int py = iy - 1; py >= 0 && carry > 0; py--)
+    {
+        uint16_t *p = buf + py * nwidth + ix;
+        int newval  = static_cast<int>(*p) + carry;
+        if (newval > m_MaxVal)
+        {
+            carry  = newval - m_MaxVal;
+            newval = m_MaxVal;
+        }
+        else
+        {
+            carry = 0;
+        }
+        if (newval > m_MaxPix) m_MaxPix = newval;
+        *p = static_cast<uint16_t>(newval);
+    }
+
+    // Drain downward (toward row nheight-1), carrying floor(total/2).
+    carry = total / 2;
+    for (int py = iy + 1; py < nheight && carry > 0; py++)
+    {
+        uint16_t *p = buf + py * nwidth + ix;
+        int newval  = static_cast<int>(*p) + carry;
+        if (newval > m_MaxVal)
+        {
+            carry  = newval - m_MaxVal;
+            newval = m_MaxVal;
+        }
+        else
+        {
+            carry = 0;
+        }
+        if (newval > m_MaxPix) m_MaxPix = newval;
+        *p = static_cast<uint16_t>(newval);
+    }
+}
+
+// #8: Clip at uint16_t max (65535), not at m_MaxVal, so BleedColumn can see
+// and redistribute the excess above the saturation floor.
 int SimulatorBase::AddToPixel(INDI::CCDChip *targetChip, int x, int y, int val)
 {
     int const nwidth  = targetChip->getSubW();
@@ -64,8 +250,8 @@ int SimulatorBase::AddToPixel(INDI::CCDChip *targetChip, int x, int y, int val)
     pt += y * nwidth + x;
 
     int newval = static_cast<int>(pt[0]) + val;
-    if (newval > m_MaxVal)
-        newval = m_MaxVal;
+    if (newval > 65535)
+        newval = 65535;
     if (newval > m_MaxPix)
         m_MaxPix = newval;
     if (newval < m_MinPix)

@@ -198,6 +198,7 @@ protected:
     INDI::PropertyNumber SimulatorSettingsNP {16};
 
     INDI::PropertySwitch SimulateBayerSP {2};
+    INDI::PropertySwitch DiffractionSpikesSP {2};
     enum
     {
         INDI_ENABLED,

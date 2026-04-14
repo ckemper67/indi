@@ -45,6 +45,7 @@ which can simulate backlash to the guiding pulses. See its Dec Backlash paramete
 ************************************************************************************/
 
 #include "guide_simulator.h"
+#include "bright_stars_catalog.h"
 #include "indicom.h"
 #include "stream/streammanager.h"
 
@@ -54,6 +55,7 @@ which can simulate backlash to the guiding pulses. See its Dec Backlash paramete
 #include <libastro.h>
 
 #include <cmath>
+#include <random>
 #include <unistd.h>
 
 static pthread_cond_t cv         = PTHREAD_COND_INITIALIZER;
@@ -71,6 +73,8 @@ GuideSim::GuideSim()
 
     m_StreamPredicate = 0;
     m_TerminateThread = false;
+
+    m_RefApertureMM = 30.0;
 }
 
 bool GuideSim::SetupParms()
@@ -393,10 +397,19 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     else
         exposure_time = m_ExposureRequest;
 
-    exposure_time *= (1 + sqrt(GainNP[0].getValue()));
+    // Gain scales collected flux linearly. Calibrated so that at the default gain (90) the
+    // SIM_SATURATION / SIM_LIMITINGMAG definitions hold.
+    static constexpr double referenceGain       = 90.0;
+    static constexpr double referenceGainFactor = 10.4868; // = 1 + sqrt(90), preserves original calibration
+    exposure_time *= GainNP[0].getValue() / referenceGain * referenceGainFactor;
 
     auto targetFocalLength = ScopeInfoNP[FOCAL_LENGTH].getValue() > 0 ? ScopeInfoNP[FOCAL_LENGTH].getValue() :
                              snoopedFocalLength;
+    if (!std::isfinite(targetFocalLength) || targetFocalLength <= 0)
+    {
+        LOG_WARN("Guide scope focal length not available. Set Scope Info > Focal Length or connect an active telescope. Defaulting to 400 mm.");
+        targetFocalLength = 400.0;
+    }
 
     if (m_ShowStarField)
     {
@@ -472,6 +485,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         if (pierSide == 1)
             theta -= 180;       // rotate 180 if on East
         theta = range360(theta);
+        m_CameraTheta = theta * M_PI / 180.0;
         LOGF_DEBUG("Rotator Angle: %f, Camera Rotation: %f", RotatorAngle, theta);
 
         // JM: 2015-03-17: Next we do a rotation assuming CW for angle theta
@@ -759,10 +773,38 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             {
                 LOG_ERROR("Error looking up stars, is gsc installed with appropriate environment variables set ??");
             }
-            if (drawn == 0)
+
+            // Bright star supplement: GSC omits stars brighter than ~mag 6.5.
+            // Iterate the embedded catalog and render any that fall within the FOV.
+            for (int bsi = 0; bsi < s_BrightStarsCount; ++bsi)
             {
-                LOG_ERROR("Got no stars, is gsc installed with appropriate environment variables set ??");
+                float const bsRaDeg  = s_BrightStars[bsi].ra;
+                float const bsDecDeg = s_BrightStars[bsi].dec;
+                float const bsMag    = s_BrightStars[bsi].mag;
+
+                double srar  = bsRaDeg  * DEGREES_TO_RADIANS;
+                double sdecr = bsDecDeg * DEGREES_TO_RADIANS;
+
+                double denom = cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr);
+                if (denom <= 0)
+                    continue;
+
+                double sx = cos(sdecr) * sin(srar - rar) / denom;
+                double sy = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) / denom;
+
+                double ccdx = pa * sx + pb * sy + pc;
+                double ccdy = pd * sx + pe * sy + pf;
+                ccdx = ccdW - ccdx;
+
+                drawn += DrawImageStar(targetChip, bsMag, ccdx, ccdy, exposure_time);
             }
+
+            // After GSC and the bright-star supplement: nothing rendered at all.
+            // Most commonly a real GSC install would have populated the field; the
+            // supplement only fires for very bright stars, so a quiet field here
+            // is normal at most pointings.
+            if (drawn == 0)
+                LOG_DEBUG("Frame contains no catalog stars (GSC empty and no bright-star supplement entries in FOV).");
         }
         //fprintf(stderr,"Got %d stars from %d lines drew %d\n",stars,lines,drawn);
 
@@ -799,43 +841,21 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
             for (int y = 0; y < nheight; y++)
             {
+                float const sy = nheight / 2 - y;
                 for (int x = 0; x < nwidth; x++)
                 {
-                    float dc; //  distance from center
-                    float fp; //  flux this pixel;
-                    float sx, sy;
-                    float vig;
+                    float const sx  = nwidth / 2 - x;
+                    float const vig = std::min(nwidth, nheight) * m_ImageScaleX;
+                    float const dc2 = sx * sx * m_ImageScaleX * m_ImageScaleX
+                                    + sy * sy * m_ImageScaleY * m_ImageScaleY;
+                    float const fa  = exp(-2.0 * 0.7 * dc2 / (vig * vig));
 
-                    sx = nwidth / 2 - x;
-                    sy = nheight / 2 - y;
+                    float fp = (pt[0] + skyflux) * fa
+                               + static_cast<float>(random() % 1000) / 1000.0f;
 
-                    vig = nwidth;
-                    vig = vig * m_ImageScaleX;
-                    //  need to make this account for actual pixel size
-                    dc = std::sqrt(sx * sx * m_ImageScaleX * m_ImageScaleX + sy * sy * m_ImageScaleY * m_ImageScaleY);
-                    //  now we have the distance from center, in arcseconds
-                    //  now lets plot a gaussian falloff to the edges
-                    //
-                    float fa;
-                    fa = exp(-2.0 * 0.7 * (dc * dc) / vig / vig);
-
-                    //  get the current value
-                    fp = pt[0];
-
-                    //  Add the sky glow
-                    fp += skyflux;
-
-                    //  now scale it for the vignetting
-                    fp = fa * fp;
-
-                    //  clamp to limits
-                    if (fp > m_MaxVal)
-                        fp = m_MaxVal;
-                    if (fp > m_MaxPix)
-                        m_MaxPix = fp;
-                    if (fp < m_MinPix)
-                        m_MinPix = fp;
-                    //  and put it back
+                    if (fp > m_MaxVal) fp = m_MaxVal;
+                    if (fp > m_MaxPix) m_MaxPix = fp;
+                    if (fp < m_MinPix) m_MinPix = fp;
                     pt[0] = fp;
                     pt++;
                 }
@@ -850,17 +870,21 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         if (m_MaxNoise > 0)
         {
+            // Poisson shot noise: sigma = sqrt(signal). Approximated as Gaussian for signal >> 1.
+            static thread_local std::mt19937 rng(std::random_device{}());
+            static thread_local std::normal_distribution<float> normalDist(0.0f, 1.0f);
+
+            uint16_t * buf = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
+            int const nw   = targetChip->getSubW();
+
             for (int x = subX; x < subW; x++)
             {
                 for (int y = subY; y < subH; y++)
                 {
-                    int noise;
-
-                    noise = random();
-                    noise = noise % m_MaxNoise; //
-
-                    //IDLog("noise is %d\n", noise);
-                    AddToPixel(targetChip, x, y, m_Bias + noise);
+                    float const signal = static_cast<float>(buf[(y - subY) * nw + (x - subX)]);
+                    int   const shot   = static_cast<int>(normalDist(rng) * std::sqrt(signal));
+                    int   const read   = random() % m_MaxNoise;
+                    AddToPixel(targetChip, x, y, std::max(0, m_Bias + read + shot));
                 }
             }
         }
@@ -882,6 +906,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     }
     return 0;
 }
+
 
 IPState GuideSim::GuideNorth(uint32_t v)
 {
@@ -934,37 +959,10 @@ bool GuideSim::ISNewNumber(const char * dev, const char * name, double values[],
         {
             SimulatorSettingsNP.update(values, names, n);
             SimulatorSettingsNP.setState(IPS_OK);
-
-            //  Reset our parameters now
             SetupParms();
             SimulatorSettingsNP.apply();
-
-            m_MaxNoise      = SimulatorSettingsNP[SIM_NOISE].getValue();
-            m_SkyGlow       = SimulatorSettingsNP[SIM_SKYGLOW].getValue();
-            m_MaxVal        = SimulatorSettingsNP[SIM_MAXVAL].getValue();
-            m_Bias          = SimulatorSettingsNP[SIM_BIAS].getValue();
-            m_LimitingMag   = SimulatorSettingsNP[SIM_LIMITINGMAG].getValue();
-            m_SaturationMag = SimulatorSettingsNP[SIM_SATURATION].getValue();
-            m_OAGoffset = SimulatorSettingsNP[SIM_OAGOFFSET].getValue();
-            m_PolarError = SimulatorSettingsNP[SIM_POLAR].getValue();
-            m_PolarDrift = SimulatorSettingsNP[SIM_POLARDRIFT].getValue();
-            m_RotationOffset = SimulatorSettingsNP[SIM_ROTATION].getValue();
-            //  Kwiq++
-            m_KingGamma = SimulatorSettingsNP[SIM_KING_GAMMA].getValue() * DEGREES_TO_RADIANS;
-            m_KingTheta = SimulatorSettingsNP[SIM_KING_THETA].getValue() * DEGREES_TO_RADIANS;
-            m_TimeFactor = SimulatorSettingsNP[SIM_TIME_FACTOR].getValue();
-
-            m_Seeing       = SimulatorSettingsNP[SIM_SEEING].getValue();
-            m_RaTimeDrift  = SimulatorSettingsNP[SIM_RA_DRIFT].getValue();
-            m_DecTimeDrift = SimulatorSettingsNP[SIM_DEC_DRIFT].getValue();
-            m_RaRand       = SimulatorSettingsNP[SIM_RA_RAND].getValue();
-            m_DecRand      = SimulatorSettingsNP[SIM_DEC_RAND].getValue();
-            m_PEPeriod     = SimulatorSettingsNP[SIM_PE_PERIOD].getValue();
-            m_PEMax        = SimulatorSettingsNP[SIM_PE_MAX].getValue();
-            m_TemperatureRequest = SimulatorSettingsNP[SIM_TEMPERATURE].getValue();
-            TemperatureNP[0].setValue(m_TemperatureRequest);
+            saveConfig(true, SimulatorSettingsNP.getName());
             TemperatureNP.apply();
-
             return true;
         }
 
@@ -1039,10 +1037,24 @@ void GuideSim::activeDevicesUpdated()
 
 bool GuideSim::ISSnoopDevice(XMLEle * root)
 {
+    const char * propName = findXMLAttValu(root, "name");
+
+    if (!strcmp(propName, "ABS_ROTATOR_ANGLE"))
+    {
+        for (XMLEle * ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            if (!strcmp(findXMLAttValu(ep, "name"), "ANGLE"))
+            {
+                RotatorAngle = atof(pcdataXMLEle(ep));
+                LOGF_DEBUG("Snooped RotatorAngle %f", RotatorAngle);
+                return true;
+            }
+        }
+    }
+
     // We try to snoop EQUATORIAL_PE first (true pointing with mount errors injected);
     // if not found we fall through to the regular EQUATORIAL_EOD_COORD snoop below.
 #ifdef USE_EQUATORIAL_PE
-    const char * propName = findXMLAttValu(root, "name");
     if (!strcmp(propName, "EQUATORIAL_PE"))
     {
         XMLEle * ep = nullptr;

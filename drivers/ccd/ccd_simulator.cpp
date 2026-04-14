@@ -19,6 +19,7 @@
 #include "ccd_simulator.h"
 #include "indicom.h"
 #include "stream/streammanager.h"
+#include "bright_stars_catalog.h"
 
 #include "locale_compat.h"
 
@@ -154,6 +155,12 @@ bool CCDSim::initProperties()
     SimulateBayerSP.fill(getDeviceName(), "SIMULATE_BAYER", "Bayer", SIMULATOR_TAB, IP_RW,
                          ISR_1OFMANY, 60, IPS_IDLE);
 
+    // Diffraction spikes (reflectors with spider vanes only; off by default)
+    DiffractionSpikesSP[INDI_ENABLED].fill("INDI_ENABLED", "Enabled", ISS_OFF);
+    DiffractionSpikesSP[INDI_DISABLED].fill("INDI_DISABLED", "Disabled", ISS_ON);
+    DiffractionSpikesSP.fill(getDeviceName(), "SIM_DIFFRACTION_SPIKES", "Diffraction Spikes",
+                             SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
     // Simulate focusing
     FocusSimulationNP[SIM_FOCUS_POSITION].fill("SIM_FOCUS_POSITION", "Focus", "%.f", 0.0, 100000.0, 1.0, 36700.0);
     FocusSimulationNP[SIM_FOCUS_MAX].fill("SIM_FOCUS_MAX", "Max. Position", "%.f", 0.0, 100000.0, 1.0, 100000.0);
@@ -277,6 +284,7 @@ void CCDSim::ISGetProperties(const char * dev)
     defineProperty(EqPENP);
     defineProperty(FocusSimulationNP);
     defineProperty(SimulateBayerSP);
+    defineProperty(DiffractionSpikesSP);
     defineProperty(CrashSP);
 }
 
@@ -522,11 +530,20 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     else
         exposure_time = ExposureRequest;
 
-    exposure_time *= (1 + sqrt(GainNP[0].getValue()));
+    // Gain scales collected flux linearly. Calibrated so that at the default gain (90) the
+    // SIM_SATURATION / SIM_LIMITINGMAG definitions hold. At gain=0 no photons are collected;
+    // at gain=180 flux is doubled, etc.
+    static constexpr double referenceGain       = 90.0;
+    static constexpr double referenceGainFactor = 10.4868; // = 1 + sqrt(90), preserves original calibration
+    exposure_time *= GainNP[0].getValue() / referenceGain * referenceGainFactor;
 
     auto targetFocalLength = ScopeInfoNP[FOCAL_LENGTH].getValue() > 0 ? ScopeInfoNP[FOCAL_LENGTH].getValue() :
                              snoopedFocalLength;
-
+    if (!std::isfinite(targetFocalLength) || targetFocalLength <= 0)
+    {
+        LOG_WARN("Telescope focal length not available. Set Scope Info > Focal Length or connect an active telescope. Defaulting to 800 mm.");
+        targetFocalLength = 800.0;
+    }
     if (ShowStarField)
     {
         float PEOffset {0};
@@ -602,6 +619,7 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         if (pierSide == 1)
             theta -= 180;       // rotate 180 if on East
         theta = range360(theta);
+        m_CameraTheta = theta * M_PI / 180.0;
         LOGF_DEBUG("Rotator Angle: %f, Camera Rotation: %f", RotatorAngle, theta);
 
         // JM: 2015-03-17: Next we do a rotation assuming CW for angle theta
@@ -726,6 +744,7 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                     rangeDec(cameradec),
                     radius,
                     lookuplimit);
+            LOGF_DEBUG("GSC command: %s", gsccmd);
 
             pp = popen(gsccmd, "r");
             if (pp != nullptr)
@@ -797,10 +816,35 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             {
                 LOG_ERROR("Error looking up stars, is gsc installed with appropriate environment variables set ??");
             }
-            if (drawn == 0)
+
+            // Bright star supplement: GSC omits stars brighter than ~mag 6.5.
+            // Iterate the embedded catalog and render any that fall within the FOV.
+            for (int bsi = 0; bsi < s_BrightStarsCount; ++bsi)
             {
-                LOG_ERROR("Got no stars, is gsc installed with appropriate environment variables set ??");
+                float const bsRaDeg  = s_BrightStars[bsi].ra;
+                float const bsDecDeg = s_BrightStars[bsi].dec;
+                float const bsMag    = s_BrightStars[bsi].mag;
+
+                double srar  = bsRaDeg  * 0.0174532925;
+                double sdecr = bsDecDeg * 0.0174532925;
+
+                double denom = cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr);
+                if (denom <= 0)
+                    continue;   // star is on the far side of the sky sphere
+
+                double sx = cos(sdecr) * sin(srar - rar) / denom;
+                double sy = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) / denom;
+
+                double ccdx = pa * sx + pb * sy + pc;
+                double ccdy = pd * sx + pe * sy + pf;
+                ccdx = ccdW - ccdx;
+
+                int rc = DrawImageStar(targetChip, bsMag, ccdx, ccdy, exposure_time);
+                drawn += rc;
             }
+
+            if (drawn == 0)
+                LOG_DEBUG("Frame contains no catalog stars (GSC empty and no bright-star supplement entries in FOV).");
         }
 
         //  now we need to add background sky glow, with vignetting
@@ -810,7 +854,7 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         if (ftype == INDI::CCDChip::LIGHT_FRAME || ftype == INDI::CCDChip::FLAT_FRAME)
         {
             //  calculate flux from our zero point and gain values
-            float glow = m_SkyGlow * 1.3;
+            float glow = m_SkyGlow;
 
             if (ftype == INDI::CCDChip::FLAT_FRAME)
             {
@@ -845,8 +889,10 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                     // Gaussian falloff to the edges of the frame
                     float const fa = exp(-2.0 * 0.7 * dc2 / (vig * vig));
 
-                    // Get the current value of the pixel, add the sky glow and scale for vignetting
-                    float fp = (pt[0] + skyflux) * fa;
+                    // Get the current value of the pixel, add the sky glow and scale for vignetting.
+                    // Dither before truncation to avoid concentric quantization rings.
+                    float fp = (pt[0] + skyflux) * fa
+                               + static_cast<float>(random() % 1000) / 1000.0f;
 
                     // Clamp to limits, store minmax
                     if (fp > m_MaxVal) fp = m_MaxVal;
@@ -869,16 +915,21 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         if (m_MaxNoise > 0)
         {
+            // Poisson shot noise: sigma = sqrt(signal). Approximated as Gaussian for signal >> 1.
+            static thread_local std::mt19937 rng(std::random_device{}());
+            static thread_local std::normal_distribution<float> normalDist(0.0f, 1.0f);
+
+            uint16_t * buf = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
+            int const nw   = targetChip->getSubW();
+
             for (int x = subX; x < subW; x++)
             {
                 for (int y = subY; y < subH; y++)
                 {
-                    int noise;
-
-                    noise = random();
-                    noise = noise % m_MaxNoise; //
-
-                    AddToPixel(targetChip, x, y, m_Bias + noise);
+                    float const signal = static_cast<float>(buf[(y - subY) * nw + (x - subX)]);
+                    int   const shot   = static_cast<int>(normalDist(rng) * std::sqrt(signal));
+                    int   const read   = random() % m_MaxNoise;
+                    AddToPixel(targetChip, x, y, std::max(0, m_Bias + read + shot));
                 }
             }
         }
@@ -1053,6 +1104,14 @@ bool CCDSim::ISNewSwitch(const char * dev, const char * name, ISState * states, 
             SimulateBayerSP.setState(IPS_OK);
             SimulateBayerSP.apply();
 
+            return true;
+        }
+        else if (DiffractionSpikesSP.isNameMatch(name))
+        {
+            DiffractionSpikesSP.update(states, names, n);
+            m_DiffractionSpikes = DiffractionSpikesSP[INDI_ENABLED].getState() == ISS_ON;
+            DiffractionSpikesSP.setState(IPS_OK);
+            DiffractionSpikesSP.apply();
             return true;
         }
         else if (CoolerSP.isNameMatch(name))
@@ -1300,6 +1359,9 @@ bool CCDSim::saveConfigItems(FILE * fp)
 
     // Bayer
     SimulateBayerSP.save(fp);
+
+    // Diffraction spikes
+    DiffractionSpikesSP.save(fp);
 
     // Focus simulation
     FocusSimulationNP.save(fp);
