@@ -45,6 +45,7 @@ which can simulate backlash to the guiding pulses. See its Dec Backlash paramete
 ************************************************************************************/
 
 #include "guide_simulator.h"
+#include "bright_stars_catalog.h"
 #include "indicom.h"
 #include "stream/streammanager.h"
 
@@ -54,6 +55,7 @@ which can simulate backlash to the guiding pulses. See its Dec Backlash paramete
 #include <libastro.h>
 
 #include <cmath>
+#include <random>
 #include <unistd.h>
 
 static pthread_cond_t cv         = PTHREAD_COND_INITIALIZER;
@@ -71,6 +73,8 @@ GuideSim::GuideSim()
 
     m_StreamPredicate = 0;
     m_TerminateThread = false;
+
+    m_RefApertureMM = 30.0;
 }
 
 bool GuideSim::SetupParms()
@@ -393,7 +397,11 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     else
         exposure_time = m_ExposureRequest;
 
-    exposure_time *= (1 + sqrt(GainNP[0].getValue()));
+    // Gain scales collected flux linearly. Calibrated so that at the default gain (90) the
+    // SIM_SATURATION / SIM_LIMITINGMAG definitions hold.
+    static constexpr double referenceGain       = 90.0;
+    static constexpr double referenceGainFactor = 10.4868; // = 1 + sqrt(90), preserves original calibration
+    exposure_time *= GainNP[0].getValue() / referenceGain * referenceGainFactor;
 
     auto targetFocalLength = ScopeInfoNP[FOCAL_LENGTH].getValue() > 0 ? ScopeInfoNP[FOCAL_LENGTH].getValue() :
                              snoopedFocalLength;
@@ -472,6 +480,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         if (pierSide == 1)
             theta -= 180;       // rotate 180 if on East
         theta = range360(theta);
+        m_CameraTheta = theta * M_PI / 180.0;
         LOGF_DEBUG("Rotator Angle: %f, Camera Rotation: %f", RotatorAngle, theta);
 
         // JM: 2015-03-17: Next we do a rotation assuming CW for angle theta
@@ -763,6 +772,31 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             {
                 LOG_ERROR("Got no stars, is gsc installed with appropriate environment variables set ??");
             }
+
+            // Bright star supplement: GSC omits stars brighter than ~mag 6.5.
+            // Iterate the embedded catalog and render any that fall within the FOV.
+            for (int bsi = 0; bsi < s_BrightStarsCount; ++bsi)
+            {
+                float const bsRaDeg  = s_BrightStars[bsi].ra;
+                float const bsDecDeg = s_BrightStars[bsi].dec;
+                float const bsMag    = s_BrightStars[bsi].mag;
+
+                double srar  = bsRaDeg  * DEGREES_TO_RADIANS;
+                double sdecr = bsDecDeg * DEGREES_TO_RADIANS;
+
+                double denom = cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr);
+                if (denom <= 0)
+                    continue;
+
+                double sx = cos(sdecr) * sin(srar - rar) / denom;
+                double sy = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) / denom;
+
+                double ccdx = pa * sx + pb * sy + pc;
+                double ccdy = pd * sx + pe * sy + pf;
+                ccdx = ccdW - ccdx;
+
+                drawn += DrawImageStar(targetChip, bsMag, ccdx, ccdy, exposure_time);
+            }
         }
         //fprintf(stderr,"Got %d stars from %d lines drew %d\n",stars,lines,drawn);
 
@@ -850,17 +884,21 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         if (m_MaxNoise > 0)
         {
+            // Poisson shot noise: sigma = sqrt(signal). Approximated as Gaussian for signal >> 1.
+            static thread_local std::mt19937 rng(std::random_device{}());
+            static thread_local std::normal_distribution<float> normalDist(0.0f, 1.0f);
+
+            uint16_t * buf = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
+            int const nw   = targetChip->getSubW();
+
             for (int x = subX; x < subW; x++)
             {
                 for (int y = subY; y < subH; y++)
                 {
-                    int noise;
-
-                    noise = random();
-                    noise = noise % m_MaxNoise; //
-
-                    //IDLog("noise is %d\n", noise);
-                    AddToPixel(targetChip, x, y, m_Bias + noise);
+                    float const signal = static_cast<float>(buf[(y - subY) * nw + (x - subX)]);
+                    int   const shot   = static_cast<int>(normalDist(rng) * std::sqrt(signal));
+                    int   const read   = random() % m_MaxNoise;
+                    AddToPixel(targetChip, x, y, std::max(0, m_Bias + read + shot));
                 }
             }
         }
@@ -882,6 +920,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     }
     return 0;
 }
+
 
 IPState GuideSim::GuideNorth(uint32_t v)
 {

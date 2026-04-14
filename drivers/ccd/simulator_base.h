@@ -26,13 +26,29 @@ class SimulatorBase : public INDI::CCD
         float m_ImageScaleX {1.0};  // arcsec/pixel
         float m_ImageScaleY {1.0};  // arcsec/pixel
 
-        // Convert magnitude to ADU per second at the calibration aperture.
+        // Reference aperture for flux calibration (mm).
+        // CCD sim: 100 mm; guide sim: 30 mm (typical guide scope).
+        // Flux scales as (D / m_RefApertureMM)^2.
+        double m_RefApertureMM {100.0};
+
+        // Camera rotation in radians; updated each frame from rotation offset + snooped rotator angle.
+        double m_CameraTheta {0.0};
+
+        // When true, render 4-pointed diffraction spikes for bright stars.
+        // Only appropriate for scopes with secondary mirror spider vanes (reflectors).
+        bool m_DiffractionSpikes {false};
+
+        // Convert magnitude to ADU per second at the reference aperture.
         double flux(double mag) const;
 
-        // Draw a Gaussian star PSF centered at pixel (x, y).
+        // Draw a Moffat PSF star centered at pixel (x, y), aperture-scaled.
         int DrawImageStar(INDI::CCDChip *targetChip, float mag, float x, float y, float exposure_time);
 
-        // Add val ADU to pixel (x, y); clamps to m_MaxVal, updates m_MaxPix/m_MinPix.
+        // Propagate saturated-pixel overflow up/down the column.
+        void BleedColumn(INDI::CCDChip *targetChip, int cx, int cy);
+
+        // Add val ADU to pixel (x, y); clamps to uint16_t max (65535) so BleedColumn
+        // can see and redistribute the excess above m_MaxVal. Updates m_MaxPix/m_MinPix.
         int AddToPixel(INDI::CCDChip *targetChip, int x, int y, int val);
 
         // Seconds remaining of an exposure started at 'start' with duration 'req'.

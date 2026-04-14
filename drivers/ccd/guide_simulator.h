@@ -72,6 +72,7 @@ class GuideSim : public SimulatorBase
 
         int DrawCcdFrame(INDI::CCDChip *targetChip);
 
+
         virtual IPState GuideNorth(uint32_t) override;
         virtual IPState GuideSouth(uint32_t) override;
         virtual IPState GuideEast(uint32_t) override;
@@ -115,6 +116,8 @@ class GuideSim : public SimulatorBase
         // Without a rotator device ("Manual Rotator") the rotator angle is
         // considered fixed to 0° and the camera rotation is equal to offset
         float m_RotationOffset { 0 };
+        // Camera rotation angle in radians, updated each frame from m_RotationOffset + RotatorAngle.
+        double m_CameraTheta {0.0};
 
         bool m_SimulateRGB { false };
 
