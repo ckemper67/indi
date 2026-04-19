@@ -103,6 +103,12 @@ void MathPluginManagement::ProcessTextProperties(Telescope *pTelescope, const ch
 
         if (0 != strcmp(AlignmentSubsystemMathPlugins.get()[0].label, AlignmentSubsystemCurrentMathPlugin.text))
         {
+            // Capture current mount alignment before unloading the old plugin so we can
+            // propagate it to the newly loaded plugin.  Without this, every externally-loaded
+            // plugin (Nearest, SPK, SVD, …) defaults to ZENITH, which silently switches EQ
+            // drivers to the AltAz code paths and produces garbage Goto coordinates.
+            MountAlignment_t currentMountAlignment = GetApproximateMountAlignment();
+
             // Unload old plugin if required
             if (nullptr != LoadedMathPluginHandle)
             {
@@ -138,6 +144,8 @@ void MathPluginManagement::ProcessTextProperties(Telescope *pTelescope, const ch
                 if (nullptr != Create)
                 {
                     pLoadedMathPlugin = Create();
+                    SetApproximateMountAlignment(currentMountAlignment);
+                    Initialise(CurrentInMemoryDatabase);
 
                     // TODO - Update the client to reflect the new plugin
                     int i = 0;
