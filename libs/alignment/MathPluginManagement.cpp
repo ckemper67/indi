@@ -101,6 +101,18 @@ void MathPluginManagement::ProcessTextProperties(Telescope *pTelescope, const ch
         AlignmentSubsystemCurrentMathPluginV.s = IPS_OK;
         IUUpdateText(&AlignmentSubsystemCurrentMathPluginV, texts, names, n);
 
+        // If the switch has already selected and loaded an external plugin, it takes
+        // precedence over the text property (which may be stale from a previous config
+        // save).  Sync the text to match the switch and skip the redundant reload.
+        int currentSwitch = IUFindOnSwitchIndex(&AlignmentSubsystemMathPluginsV);
+        if (currentSwitch > 0 && currentSwitch <= (int)MathPluginFiles.size())
+        {
+            const char *switchPath = MathPluginFiles[currentSwitch - 1].c_str();
+            if (strcmp(AlignmentSubsystemCurrentMathPlugin.text, switchPath) != 0)
+                IUSaveText(&AlignmentSubsystemCurrentMathPlugin, switchPath);
+            return;
+        }
+
         if (0 != strcmp(AlignmentSubsystemMathPlugins.get()[0].label, AlignmentSubsystemCurrentMathPlugin.text))
         {
             // Capture current mount alignment before unloading the old plugin so we can
