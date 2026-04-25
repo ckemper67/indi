@@ -112,7 +112,7 @@ bool SPKMathPlugin::Initialise(InMemoryDatabase *pInMemoryDatabase)
             if (SolveNormalEquations(pmv))
             {
                 m_NE_n = n;
-                ParsePmfitCoefficients(pmv, 6);
+                ParsePmfitCoefficients(pmv, PMFIT_TERMS);
                 return true;
             }
         }
@@ -121,11 +121,12 @@ bool SPKMathPlugin::Initialise(InMemoryDatabase *pInMemoryDatabase)
     }
 
     // Cold path: full Pmfit rebuild.
+    PmfitTerm terms[7] = {};
     int nt = 0;
-    std::vector<double> obsData = BuildObservationData(syncPoints, nt);
+    std::vector<double> obsData = BuildObservationData(syncPoints, terms, nt);
 
     double pmv[6] = {}, pms[6] = {}, skysig = 0;
-    int js = Pmfit(m_Obs.slat, mountChar, n, obsData.data(), nt, pmv, pms, &skysig);
+    int js = Pmfit(m_Obs.slat, mountChar, n, obsData.data(), terms, nt, pmv, pms, &skysig);
     if (js != 0)
     {
         ASSDEBUGF("SPK Pmfit failed: js=%d", js);
@@ -133,7 +134,7 @@ bool SPKMathPlugin::Initialise(InMemoryDatabase *pInMemoryDatabase)
         return false;
     }
 
-    ParsePmfitCoefficients(pmv, nt);
+    ParsePmfitCoefficients(pmv, terms);
 
     // If we have a full 6-term model, build the NE accumulator so subsequent
     // single-point additions can use the hot path.
@@ -370,7 +371,7 @@ bool SPKMathPlugin::AccumulateObsRow(double oblon, double oblat,
     // (encoder demand = rdem/pdem), which is Pmfit iteration-0.
     double bf[12]; // 2 * 6 terms
     char mountChar = (m_Obs.mount == ALTAZ) ? 'A' : 'E';
-    if (Bfun(6, m_Obs.slat, mountChar, oblon, oblat, bf) != 0)
+    if (Bfun(PMFIT_TERMS, 6, m_Obs.slat, mountChar, oblon, oblat, bf) != 0) /* nt=6: full hot-path model */
         return false;
 
     double xi  = iauAnpm(oblon - rdem) * cos(oblat);
@@ -410,16 +411,17 @@ bool SPKMathPlugin::SolveNormalEquations(double pmv[6])
     return ok;
 }
 
-std::vector<double> SPKMathPlugin::BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, int &outTermCount)
+std::vector<double> SPKMathPlugin::BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, PmfitTerm *terms, int &outNt)
 {
-    // Pmfit term order: IH, ID, ME, MA, CH, TF  (equatorial)
-    //                   IA, IE, AN, AW, CA, TF  (altazimuth)
-    // Polar/axis-tilt terms come before collimation so that a 4-term fit on
-    // 3 points (6 measurements, 4 unknowns) is well-conditioned.
-    outTermCount = 6;
-    if      (syncPoints.size() < 3) outTermCount = 2; // 1-2 pts: IH, ID
-    else if (syncPoints.size() < 5) outTermCount = 4; // 3-4 pts: IH, ID, ME, MA
-    else if (syncPoints.size() < 6) outTermCount = 5; // 5 pts:   IH, ID, ME, MA, CH
+    // Polar/axis-tilt terms precede collimation so a 4-term fit on 3 points
+    // (6 measurements, 4 unknowns) is well-conditioned.
+    outNt = 6;
+    if      (syncPoints.size() < 3) outNt = 2; // 1-2 pts: IA, IB
+    else if (syncPoints.size() < 5) outNt = 4; // 3-4 pts: IA, IB, AN, AW
+    else if (syncPoints.size() < 6) outNt = 5; // 5 pts:   IA, IB, AN, AW, CA
+    // terms[] was zero-initialised by caller (PMFIT_NONE); fill in active terms.
+    for (int i = 0; i < outNt; i++)
+        terms[i] = PMFIT_TERMS[i];
     // 6+ pts: full model
 
     std::vector<double> obsData;
@@ -456,31 +458,25 @@ std::vector<double> SPKMathPlugin::BuildObservationData(const InMemoryDatabase::
     return obsData;
 }
 
-void SPKMathPlugin::ParsePmfitCoefficients(const double pmv[6], int terms)
+void SPKMathPlugin::ParsePmfitCoefficients(const double pmv[], const PmfitTerm *terms)
 {
     memset(&m_PM, 0, sizeof(m_PM));
 
-    if (m_Obs.mount == ALTAZ)
+    // Wallace (2002) Note 4 sign conventions:
+    //   equatorial: IA=-IH, IB=ID, AN=ME, AW=-MA, CA=-CH, VD=TF
+    //   altazimuth: IA=IA,  IB=IE, AN=AN, AW=AW,  CA=CA,  VD=TF
+    for (int i = 0; terms[i] != PMFIT_NONE; i++)
     {
-        // Pmfit order: IA, IE, AN, AW, CA, TF
-        // Wallace (2002) Note 4 (altaz): IA=bf[0], IB=bf[1], AN=bf[2], AW=bf[3], CA=bf[4], VD=bf[5]
-        if (terms >= 1) m_PM.pia = pmv[0];
-        if (terms >= 2) m_PM.pib = pmv[1];
-        if (terms >= 3) m_PM.pan = pmv[2];
-        if (terms >= 4) m_PM.paw = pmv[3];
-        if (terms >= 5) m_PM.pca = pmv[4];
-        if (terms >= 6) m_PM.pvd = pmv[5];
-    }
-    else // EQUATORIAL
-    {
-        // Pmfit order: IH, ID, ME, MA, CH, TF
-        // Wallace (2002) Note 4 (equat): IA=-bf[0], IB=bf[1], AW=-bf[3], AN=bf[2], CA=-bf[4], VD=bf[5]
-        if (terms >= 1) m_PM.pia = -pmv[0];
-        if (terms >= 2) m_PM.pib = pmv[1];
-        if (terms >= 3) m_PM.paw = -pmv[3];
-        if (terms >= 4) m_PM.pan = pmv[2];
-        if (terms >= 5) m_PM.pca = -pmv[4];
-        if (terms >= 6) m_PM.pvd = pmv[5];
+        switch (terms[i])
+        {
+        case PMFIT_IA: m_PM.pia = (m_Obs.mount == ALTAZ) ?  pmv[i] : -pmv[i]; break;
+        case PMFIT_IB: m_PM.pib =                            pmv[i];            break;
+        case PMFIT_AN: m_PM.pan =                            pmv[i];            break;
+        case PMFIT_AW: m_PM.paw = (m_Obs.mount == ALTAZ) ?  pmv[i] : -pmv[i]; break;
+        case PMFIT_CA: m_PM.pca = (m_Obs.mount == ALTAZ) ?  pmv[i] : -pmv[i]; break;
+        case PMFIT_TF:   m_PM.pvd =                            pmv[i];            break;
+        case PMFIT_NONE: break;
+        }
     }
 }
 

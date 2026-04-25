@@ -6,10 +6,14 @@
 #include <gsl/gsl_linalg.h>
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_vector.h>
+#include "pmfit.h"
 
-int Bfun ( int, double, char, double, double, double* );
+const PmfitTerm PMFIT_TERMS[7] = {PMFIT_IA, PMFIT_IB, PMFIT_AN, PMFIT_AW, PMFIT_CA, PMFIT_TF, PMFIT_NONE};
 
-int Pmfit ( double phi, char mount, int n, double* obs, int nt,
+int Bfun ( const PmfitTerm*, int, double, char, double, double, double* );
+
+int Pmfit ( double phi, char mount, int n, double* obs,
+            const PmfitTerm* terms, int nt,
             double* pm, double* sigmas, double* skysig )
 /*
 **  - - - - - -
@@ -85,9 +89,8 @@ int Pmfit ( double phi, char mount, int n, double* obs, int nt,
    double tst, oblon, oblat, elon, elat, enclon, enclat, w, adj, sumr2,
           skyvar;
 
-
-/* Validate n. */
-   if ( n < 1 ) return -1;
+/* Validate inputs. */
+   if ( n < 1 || nt < 1 ) return -1;
 
 /* Allocate space for the samples. */
    y = (SAM*) malloc ( n * sizeof(SAM) );
@@ -138,7 +141,7 @@ int Pmfit ( double phi, char mount, int n, double* obs, int nt,
       /* Apply the current model to correct the encoder demands. */
          elon = enclon;
          elat = enclat;
-         if ( Bfun ( nt, phi, mount, elon, elat, bf ) ) goto free;
+         if ( Bfun ( terms, nt, phi, mount, elon, elat, bf ) ) goto free;
          for ( j = 0; j < nt; j++ ) {
             elon += ( pm[j] * BF(j,0) ) / cos(elat);
             elat += pm[j] * BF(j,1);
@@ -171,7 +174,7 @@ int Pmfit ( double phi, char mount, int n, double* obs, int nt,
       gsl_vector_set_zero ( vB );
 
       for ( m = 0; m < n; m++ ) {
-         if ( Bfun ( nt, phi, mount, y[m].r, y[m].p, bf ) ) goto free;
+         if ( Bfun ( terms, nt, phi, mount, y[m].r, y[m].p, bf ) ) goto free;
          for ( i = 0; i < nt; i++ ) {
             gsl_matrix_set ( mA, 2*m,   i, BF(i,0) );
             gsl_matrix_set ( mA, 2*m+1, i, BF(i,1) );
@@ -220,7 +223,7 @@ int Pmfit ( double phi, char mount, int n, double* obs, int nt,
    /* Predicted observed place using the fitted model. */
       elon = enclon;
       elat = enclat;
-      if ( Bfun ( nt, phi, mount, elon, elat, bf ) ) goto free;
+      if ( Bfun ( terms, nt, phi, mount, elon, elat, bf ) ) goto free;
       for ( j = 0; j < nt; j++ ) {
          elon += ( pm[j] * BF(j,0) ) / cos(elat);
          elat += pm[j] * BF(j,1);
@@ -277,8 +280,8 @@ free:
 
 /* ------------------------------------------------------------------ */
 
-int Bfun ( int nt, double phi, char mount, double rdem, double pdem,
-           double* bf )
+int Bfun ( const PmfitTerm* terms, int nt, double phi, char mount,
+           double rdem, double pdem, double* bf )
 /*
 **  - - - - - -
 **   B a s i s
@@ -356,15 +359,11 @@ int Bfun ( int nt, double phi, char mount, double rdem, double pdem,
 /* Basis function addressing */
    #define BF(i,j) bf[i*2+j]
 
-/* Number of terms supported by the present function */
-   const double nterms = 6;
-
    double sp, cp, hdem, ddem, adem, edem,
           sh, ch, sd, cd, sa, ca, se, ce;
+   int i;
 
-
-/* Verify that the model length is valid. */
-   if ( nt < 1 || nt > (int)nterms ) return -1;
+   if ( nt < 1 ) return -1;
 
 /* Functions of latitude. */
    sp = sin(phi);
@@ -430,36 +429,30 @@ int Bfun ( int nt, double phi, char mount, double rdem, double pdem,
 ** coefficients.
 */
 
-   switch ( (int) mount ) {
-
-   case 'E':
-
-   /* Equatorial: IH, ID, ME, MA, CH, TF */
-   /* Polar-axis terms (ME, MA) precede collimation (CH) so that a    */
-   /* 4-term fit on 3 points is well-conditioned for polar alignment.  */
-
-      if (nt > 0) { BF(0,0) = cd;      BF(0,1) = 0.0; }               /* IH */
-      if (nt > 1) { BF(1,0) = 0.0;     BF(1,1) = 1.0; }               /* ID */
-      if (nt > 2) { BF(2,0) = sh*sd;   BF(2,1) = ch;  }               /* ME */
-      if (nt > 3) { BF(3,0) = -ch*sd;  BF(3,1) = sh;  }               /* MA */
-      if (nt > 4) { BF(4,0) = 1.0;     BF(4,1) = 0.0; }               /* CH */
-      if (nt > 5) { BF(5,0) = cp*sh;   BF(5,1) = cp*ch*sd-sp*cd; }    /* TF */
-
-      break;
-
-   default:
-
-   /* Altazimuth: IA, IE, AN, AW, CA, TF */
-   /* Axis-tilt terms (AN, AW) precede collimation (CA) for the same  */
-   /* reason as the equatorial reordering above.                       */
-
-      if (nt > 0) { BF(0,0) = -ce;     BF(0,1) = 0.0; }               /* IA */
-      if (nt > 1) { BF(1,0) = 0.0;     BF(1,1) = 1.0; }               /* IE */
-      if (nt > 2) { BF(2,0) = -sa*se;  BF(2,1) = -ca; }               /* AN */
-      if (nt > 3) { BF(3,0) = -ca*se;  BF(3,1) = sa;  }               /* AW */
-      if (nt > 4) { BF(4,0) = -1.0;    BF(4,1) = 0.0; }               /* CA */
-      if (nt > 5) { BF(5,0) = 0.0;     BF(5,1) = -ce; }               /* TF */
-
+   if ( mount == 'E' ) {
+      for ( i = 0; i < nt; i++ ) {
+         switch ( terms[i] ) {
+         case PMFIT_IA: BF(i,0) = cd;      BF(i,1) = 0.0;             break; /* IH */
+         case PMFIT_IB: BF(i,0) = 0.0;     BF(i,1) = 1.0;             break; /* ID */
+         case PMFIT_AN: BF(i,0) = sh*sd;   BF(i,1) = ch;              break; /* ME */
+         case PMFIT_AW: BF(i,0) = -ch*sd;  BF(i,1) = sh;              break; /* MA */
+         case PMFIT_CA: BF(i,0) = 1.0;     BF(i,1) = 0.0;             break; /* CH */
+         case PMFIT_TF: BF(i,0) = cp*sh;   BF(i,1) = cp*ch*sd-sp*cd; break; /* TF */
+         default: return -1;
+         }
+      }
+   } else {
+      for ( i = 0; i < nt; i++ ) {
+         switch ( terms[i] ) {
+         case PMFIT_IA: BF(i,0) = -ce;     BF(i,1) = 0.0;             break; /* IA */
+         case PMFIT_IB: BF(i,0) = 0.0;     BF(i,1) = 1.0;             break; /* IE */
+         case PMFIT_AN: BF(i,0) = -sa*se;  BF(i,1) = -ca;             break; /* AN */
+         case PMFIT_AW: BF(i,0) = -ca*se;  BF(i,1) = sa;              break; /* AW */
+         case PMFIT_CA: BF(i,0) = -1.0;    BF(i,1) = 0.0;             break; /* CA */
+         case PMFIT_TF: BF(i,0) = 0.0;     BF(i,1) = -ce;             break; /* TF */
+         default: return -1;
+         }
+      }
    }
 
 /* Success. */

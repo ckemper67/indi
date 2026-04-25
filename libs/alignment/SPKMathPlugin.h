@@ -21,6 +21,7 @@
 #pragma once
 
 #include "MathPlugin.h"
+#include "pmfit.h"
 #include "spk/spk.h"
 #include "TelescopeDirectionVectorSupportFunctions.h"
 #include "libastro.h"
@@ -62,8 +63,8 @@ class SPKMathPlugin : public MathPlugin, public TelescopeDirectionVectorSupportF
         bool UpdateObsConfig();
         void UpdateAstrometry(double JD);
 
-        std::vector<double> BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, int &outTermCount);
-        void ParsePmfitCoefficients(const double pmv[6], int terms);
+        std::vector<double> BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, PmfitTerm *terms, int &outNt);
+        void ParsePmfitCoefficients(const double pmv[], const PmfitTerm *terms);
         TelescopeDirectionVector RollPitchToDirectionVector(double roll, double pitch);
         void DirectionVectorToRollPitch(const TelescopeDirectionVector &v, double &roll, double &pitch);
 
