@@ -19,6 +19,7 @@
 *******************************************************************************/
 
 #include "SPKMathPlugin.h"
+#include "pmfit.h"
 #include "DriverCommon.h"
 #include <vector>
 #include <cmath>
@@ -28,6 +29,9 @@
 #include "spk/sofa.h"
 #include <libnova/julian_day.h>
 #include <libnova/sidereal_time.h>
+#include <gsl/gsl_linalg.h>
+#include <gsl/gsl_matrix.h>
+#include <gsl/gsl_vector.h>
 
 namespace INDI
 {
@@ -385,18 +389,25 @@ bool SPKMathPlugin::AccumulateObsRow(double oblon, double oblat,
 
 bool SPKMathPlugin::SolveNormalEquations(double pmv[6])
 {
-    // Copy both arrays: Simeqn overwrites in-place, but we need to keep the
-    // accumulators intact for future incremental additions.
-    double Acopy[36];
-    double vcopy[6];
-    memcpy(Acopy, m_NE_A, sizeof(m_NE_A));
-    memcpy(vcopy, m_NE_v, sizeof(m_NE_v));
+    // The normal equation matrix m_NE_A is symmetric positive definite;
+    // use Cholesky which is the natural solver for SPD systems.
+    // Work on copies so the accumulators stay intact for future additions.
+    gsl_matrix *A = gsl_matrix_alloc(6, 6);
+    gsl_vector *x = gsl_vector_alloc(6);
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 6; j++)
+            gsl_matrix_set(A, i, j, m_NE_A[i*6 + j]);
+        gsl_vector_set(x, i, m_NE_v[i]);
+    }
 
-    if (Simeqn(6, Acopy, vcopy) != 0)
-        return false;
+    bool ok = (gsl_linalg_cholesky_decomp1(A) == GSL_SUCCESS &&
+               gsl_linalg_cholesky_solve(A, x, x) == GSL_SUCCESS);
+    if (ok)
+        for (int i = 0; i < 6; i++) pmv[i] = gsl_vector_get(x, i);
 
-    memcpy(pmv, vcopy, 6 * sizeof(double));
-    return true;
+    gsl_matrix_free(A);
+    gsl_vector_free(x);
+    return ok;
 }
 
 std::vector<double> SPKMathPlugin::BuildObservationData(const InMemoryDatabase::AlignmentDatabaseType &syncPoints, int &outTermCount)

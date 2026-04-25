@@ -163,12 +163,6 @@ int spkVtel ( spkVTS isoln, spkOBS* obs, spkOPT* opt, spkPM* pm,
               double* tara, double* tare, double* tarr, double* tarp,
               double soln[5] );
 
-/* Added for Pmfit compatibility in INDI */
-int Pmfit ( double phi, char mount, int n, double* obs, int nt,
-            double* pm, double* sigmas, double* skysig );
-int Bfun   ( int nt, double phi, char mount, double rdem, double pdem, double* bf );
-int Simeqn ( int n, double* a, double* y );
-
 #ifdef __cplusplus
 }
 #endif

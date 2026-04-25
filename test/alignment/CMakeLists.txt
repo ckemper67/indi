@@ -25,8 +25,8 @@ ADD_EXECUTABLE(test_alignment_plugins
     ../../libs/alignment/NearestMathPlugin.cpp
     ../../libs/alignment/BasicMathPlugin.cpp
     ../../libs/alignment/SPKMathPlugin.cpp
+    ../../libs/alignment/pmfit.cpp
     ../../libs/alignment/spk/vtel.c
-    ../../libs/alignment/spk/pmfit.c
     ../../libs/alignment/spk/astr.c
     ../../drivers/telescope/scopesim_helper.cpp
 )
@@ -42,6 +42,7 @@ TARGET_LINK_LIBRARIES(test_alignment_plugins
     AlignmentDriver
     indidriver
     PkgConfig::ERFA
+    ${GSL_LIBRARIES}
     ${GTEST_BOTH_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )

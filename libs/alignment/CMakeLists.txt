@@ -188,8 +188,8 @@ install(TARGETS indi_SVD_MathPlugin
 # #################################################
 set(SPKMathPlugin_SRCS
     SPKMathPlugin.cpp
+    pmfit.cpp
     spk/vtel.c
-    spk/pmfit.c
     spk/astr.c
 )
 
@@ -207,6 +207,7 @@ target_link_libraries(indi_SPK_MathPlugin
     indidriver
     PkgConfig::ERFA
     ${NOVA_LIBRARIES}
+    ${GSL_LIBRARIES}
     $<$<PLATFORM_ID:CYGWIN>:AlignmentDriver>
 )
 
