@@ -48,11 +48,11 @@ This encoding is internal to the SPK library. `SPKMathPlugin` translates between
 
 All plugins rely on **libnova** to determine Local Sidereal Time (LST) to maintain tight integration and backward compatibility with the INDI driver ecosystem.
 
-Some plugins (like SPK) additionally use ERFA internally. To ensure there is no clock drift between libnova and the ERFA engine, synchronization occurs via the Earth Rotation Angle (ERA):
+The SPK plugin also needs the ERFA `eraASTROM` astrometry context for its coordinate transforms.  `UpdateAstrometry` populates this struct directly from libnova and the vendored `eraEra00` function, keeping the entire pipeline consistent with a single LST source:
 
-$$ \text{LST}_{rad} = (\text{GAST}_{hrs} + \lambda_{hrs}) \times \frac{\pi}{12} $$
-$$ \text{eral} = \text{LST}_{rad} + \text{EO} $$
-*(Where EO is the Equation of the Origins)*
+$$ \text{ERA} = \texttt{eraEra00}(JD) $$
+$$ \text{eral} = \text{ERA} + \lambda_{rad} \quad \text{(Local Earth Rotation Angle)} $$
+$$ \text{EO} = \text{ERA} - \text{GAST}_{\text{libnova}} \quad \text{(Equation of Origins, for APPT} \leftrightarrow \text{CIRS)} $$
 
 ---
 
@@ -171,7 +171,7 @@ The SPK model involves a few specific implementation abstractions to interface w
 Transformations occur via a "Virtual Telescope" model.
 
 1. `TransformCelestialToTelescope(RA, Dec)` → `Vector`
-   * Calls `UpdateAstrometry` (which invokes `spkAstr`) to refresh the time-dependent astrometric state (`m_Ast`) for the current Julian Date before each transform.
+   * Calls `UpdateAstrometry` to refresh the time-dependent astrometric state (`m_Ast`) for the current Julian Date before each transform.  `UpdateAstrometry` populates the `eraASTROM` struct directly from libnova's GAST and the vendored `eraEra00` — it does not call `spkAstr` or `eraApco13`.
    * Takes the target coordinate and calls `spkVtel` in AXES mode twice (two-pass loop).
    * Because tube flexure depends on the current tracking elevation, but the plugin operates statelessly, the first pass calculates a hypothetical mount position (using $0,0,0$). The second pass feeds that result back in to calculate a refined, self-consistent tube droop correction.
    * Output `soln[0]` is the SPK roll (altaz: `π − Az`; equatorial: `−HA`). `RollPitchToDirectionVector` converts this to a TDV.
@@ -197,13 +197,15 @@ If the hot-path accumulation or solve fails for any reason (degenerate geometry,
 
 ### ERFA / SOFA Compatibility Layer
 
-The SPK C sources (`vtel.c`, `pmfit.c`, `astr.c`, etc.) were natively designed for the SOFA (`iauXxx`) API. Since SOFA has a non-standard restrictive license, INDI uses the open-source **ERFA** fork (which is mathematically identical).
+The SPK C sources (`vtel.c`, `pmfit.c`) were natively designed for the SOFA (`iauXxx`) API. Since SOFA has a non-standard restrictive license, INDI uses the open-source **ERFA** fork (which is mathematically identical).
 
 A C-header shim (`libs/alignment/spk/sofa.h`) maps the API at compile time without modifying Wallace's core source:
 ```c
 typedef eraASTROM iauASTROM;
 #define iauXxx eraXxx
 ```
+
+Rather than adding `liberfa` as a new system dependency, INDI vendors a minimal subset of ERFA source files in `libs/alignment/erfa/`.  Only 19 functions are needed at runtime (angle normalization, rotation matrices, Az/El ↔ HA/Dec conversions, ERA, and the CIRS ↔ observed transforms `eraAtioq`/`eraAtoiq`).  The rest of ERFA — particularly the full ICRS precession/nutation pipeline (`eraApco13`, `eraAtciqz`, `eraAticq`) — is either unreachable via `tar.sys = APPT` or replaced by thin wrappers in `erfa_libnova.c` that delegate to libnova, which INDI already depends on.  See `libs/alignment/erfa/README.md` for the full file list and provenance.
 
 #### ERFA Rotation Matrix Convention Note
 

@@ -13,9 +13,6 @@ TARGET_LINK_LIBRARIES(test_alignment
 
 ADD_TEST(test-alignment test_alignment)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ERFA REQUIRED IMPORTED_TARGET erfa)
-
 ADD_EXECUTABLE(test_alignment_plugins
     test_alignment_plugins.cpp
     ../../libs/alignment/BuiltInMathPlugin.cpp
@@ -25,7 +22,6 @@ ADD_EXECUTABLE(test_alignment_plugins
     ../../libs/alignment/SPKMathPlugin.cpp
     ../../libs/alignment/spk/vtel.c
     ../../libs/alignment/spk/pmfit.c
-    ../../libs/alignment/spk/astr.c
     ../../drivers/telescope/scopesim_helper.cpp
 )
 
@@ -39,7 +35,7 @@ TARGET_INCLUDE_DIRECTORIES(test_alignment_plugins PRIVATE
 TARGET_LINK_LIBRARIES(test_alignment_plugins
     AlignmentDriver
     indidriver
-    PkgConfig::ERFA
+    erfa_shim
     ${GTEST_BOTH_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )

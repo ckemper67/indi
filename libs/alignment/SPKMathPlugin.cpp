@@ -257,46 +257,32 @@ void SPKMathPlugin::UpdateObsConfig()
 
 void SPKMathPlugin::UpdateAstrometry(double JD)
 {
-    // Use libnova for JD to calendar conversion
-    ln_date date;
-    ln_get_date(JD, &date);
-
-    spkUTC utc;
-    utc.iy = date.years;
-    utc.mo = date.months;
-    utc.id = date.days;
-    utc.ih = date.hours;
-    utc.mi = date.minutes;
-    utc.sec = date.seconds;
-
-    // Compute LST first — needed both for the ERA synchronization below and
-    // as a safe fallback if spkAstr fails.
     double gmst_hrs = ln_get_apparent_sidereal_time(JD);
     double lst_rad  = HOURS_TO_RAD(range24(gmst_hrs + RAD_TO_HOURS(m_Obs.slon)));
     m_LST_rad = lst_rad;
 
-    spkEOP eop = {0, 0, 0};
-    // pressure=0 disables spkVtel's internal refraction model; temperature and humidity
-    // are nominal placeholders.  Atmospheric refraction is not modeled in this pipeline
-    // (INDI's coordinate flow stops at "apparent" / JNow; see tar.sys = APPT above).
-    spkAIR air = {0.0, 10.0, 0.5};
+    // Populate eraASTROM directly from libnova and site coordinates.
+    // We use APPT targets (not ICRS), so the full precession/nutation pipeline
+    // (eraApco13) is not needed.
+    //
+    // EO (equation of origins, ERFA convention: ERA - GAST) is derived from
+    // eraEra00 and libnova's apparent sidereal time so that the CIRS <-> apparent
+    // conversion in vtel.c stays consistent with the same LST throughout.
+    double jd1 = (double)(int)JD;
+    double jd2 = JD - jd1;
+    double era = eraEra00(jd1, jd2);
+    double gast_rad = HOURS_TO_RAD(range24(gmst_hrs));  // same call as above, reuse
 
-    // Zero m_Ast before calling spkAstr so a failure cannot leave stale data behind.
     memset(&m_Ast, 0, sizeof(m_Ast));
-    int astrStatus = spkAstr(1, utc, 0.0, &eop, &m_Obs, &air, &m_Opt, &m_Ast);
-    if (astrStatus < 0)
-    {
-        ASSDEBUGF("SPK UpdateAstrometry: spkAstr failed (status=%d), transforms will be inaccurate", astrStatus);
-        // Leave m_Ast zeroed; set eral from libnova LST so subsequent spkVtel
-        // calls see a minimally coherent ERA rather than garbage.
-        m_Ast.astrom.eral = iauAnp(lst_rad);
-        return;
-    }
-
-    // Synchronize SOFA internal "clock" (ERA) with libnova LST.
-    // This ensures consistency with the simulator's view of HA/Az.
-    // eral = ERA + Longitude = LST + EO
-    m_Ast.astrom.eral = iauAnp(lst_rad + m_Ast.eo);
+    m_Ast.eo             = iauAnpm(era - gast_rad);   // ERA - GAST
+    m_Ast.astrom.along   = m_Obs.slon;
+    m_Ast.astrom.phi     = m_Obs.slat;
+    m_Ast.astrom.sphi    = sin(m_Obs.slat);
+    m_Ast.astrom.cphi    = cos(m_Obs.slat);
+    // Diurnal aberration magnitude: omega * a_e * cos(phi) / c  (dimensionless)
+    m_Ast.astrom.diurab  = 1.5460e-6 * m_Ast.astrom.cphi;
+    // eral = ERA + longitude (ERFA convention for Local Earth Rotation Angle)
+    m_Ast.astrom.eral    = iauAnp(era + m_Obs.slon);
 }
 
 

@@ -184,20 +184,42 @@ install(TARGETS indi_SVD_MathPlugin
     RUNTIME DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
 
 # #################################################
+# ##### Vendored ERFA subset + libnova shim #######
+# #################################################
+add_library(erfa_shim STATIC
+    erfa/anp.c
+    erfa/anpm.c
+    erfa/ae2hd.c
+    erfa/hd2ae.c
+    erfa/c2s.c
+    erfa/s2c.c
+    erfa/cp.c
+    erfa/cr.c
+    erfa/tr.c
+    erfa/ir.c
+    erfa/rx.c
+    erfa/ry.c
+    erfa/rz.c
+    erfa/rxp.c
+    erfa/trxp.c
+    erfa/pas.c
+    erfa/era00.c
+    erfa/atioq.c
+    erfa/atoiq.c
+    erfa/erfa_libnova.c
+)
+target_include_directories(erfa_shim PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/erfa
+)
+
+# #################################################
 # ############### SPK math plugin #################
 # #################################################
-set(SPKMathPlugin_SRCS
+add_library(indi_SPK_MathPlugin SHARED
     SPKMathPlugin.cpp
     spk/vtel.c
     spk/pmfit.c
-    spk/astr.c
 )
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ERFA IMPORTED_TARGET erfa)
-
-if(ERFA_FOUND)
-add_library(indi_SPK_MathPlugin SHARED ${SPKMathPlugin_SRCS})
 target_include_directories(indi_SPK_MathPlugin
     PRIVATE
         ${CMAKE_SOURCE_DIR}/libs/indicore
@@ -205,7 +227,7 @@ target_include_directories(indi_SPK_MathPlugin
 )
 target_link_libraries(indi_SPK_MathPlugin
     indidriver
-    PkgConfig::ERFA
+    erfa_shim
     ${NOVA_LIBRARIES}
     $<$<PLATFORM_ID:CYGWIN>:AlignmentDriver>
 )
@@ -214,4 +236,3 @@ install(TARGETS indi_SPK_MathPlugin
     ARCHIVE DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
     LIBRARY DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY}
     RUNTIME DESTINATION ${INDI_MATH_PLUGINS_DIRECTORY})
-endif(ERFA_FOUND)

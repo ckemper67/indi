@@ -9,13 +9,14 @@
 ** fork of SOFA with identical mathematics.  See https://github.com/liberfa/erfa
 **
 ** Usage: add the directory containing this header to the compiler include
-** path, then link against -lerfa.  This is a header-only shim.
+** path.  The era* implementations are provided by the vendored sources in
+** libs/alignment/erfa/ together with erfa_libnova.c.
 */
 
 #ifndef SOFA_H
 #define SOFA_H
 
-#include <erfa.h>
+#include "../erfa/erfa.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,17 +56,9 @@ typedef eraLDBODY iauLDBODY;
 #define iauHd2ae   eraHd2ae
 #define iauAe2hd   eraAe2hd
 
-/* Time conversions */
-#define iauDtf2d   eraDtf2d
-#define iauJd2cal  eraJd2cal
-#define iauUtctai  eraUtctai
-#define iauTaiutc  eraTaiutc
-#define iauUtcut1  eraUtcut1
-
 /* Astrometry setup */
 #define iauAper    eraAper
 #define iauAper13  eraAper13
-#define iauApco13  eraApco13
 
 /* Coordinate transformations */
 #define iauAtciqz  eraAtciqz
