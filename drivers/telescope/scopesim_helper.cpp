@@ -29,6 +29,102 @@ char device_str[64] = "Telescope Simulator";
 
 /////////////////////////////////////////////////////////////////////
 
+// ParabolicWindow implementation
+
+void ParabolicWindow::prime(double JDnow)
+{
+    m_JD[0] = JDnow - m_step;
+    m_JD[1] = JDnow;
+    m_JD[2] = JDnow + m_step;
+    for (int i = 0; i < 3; ++i)
+        std::tie(m_x[i], m_y[i]) = m_fn(m_JD[i]);
+    m_ready = true;
+}
+
+void ParabolicWindow::advance()
+{
+    m_x[0]  = m_x[1];
+    m_y[0]  = m_y[1];
+    m_JD[0] = m_JD[1];
+    m_x[1]  = m_x[2];
+    m_y[1]  = m_y[2];
+    m_JD[1] = m_JD[2];
+    m_JD[2] = m_JD[1] + m_step;
+    std::tie(m_x[2], m_y[2]) = m_fn(m_JD[2]);
+}
+
+// Internal: compute parabolic coefficients relative to the centre sample.
+// Returns (x_b, x_a, y_b, y_a) where value = c0 + b*dt + a*dt^2,
+// dt in seconds from m_JD[1].
+static std::tuple<double, double, double, double> coefficients(
+    double xM, double x0, double xP,
+    double yM, double y0, double yP,
+    double T)
+{
+    // Unwrap x relative to centre to handle angular discontinuities
+    xM = x0 + Angle(xM - x0).Degrees();
+    xP = x0 + Angle(xP - x0).Degrees();
+
+    double x_b = (xP - xM)           / (2 * T);
+    double x_a = (xP + xM - 2 * x0) / (2 * T * T);
+    double y_b = (yP - yM)           / (2 * T);
+    double y_a = (yP + yM - 2 * y0) / (2 * T * T);
+    return std::make_tuple(x_b, x_a, y_b, y_a);
+}
+
+void ParabolicWindow::advanceTo(double JD)
+{
+    if ((JD - m_JD[2]) > 3.0 * m_step)
+        prime(JD);
+    else
+        while (JD >= m_JD[2])
+            advance();
+}
+
+std::pair<double, double> ParabolicWindow::valueAt(double JD)
+{
+    advanceTo(JD);
+
+    double T  = m_step * 86400.0;
+    double dt = (JD - m_JD[1]) * 86400.0;
+    auto coeffs = coefficients(
+                      m_x[0], m_x[1], m_x[2],
+                      m_y[0], m_y[1], m_y[2], T);
+
+    double x_b = std::get<0>(coeffs);
+    double x_a = std::get<1>(coeffs);
+    double y_b = std::get<2>(coeffs);
+    double y_a = std::get<3>(coeffs);
+
+    return std::make_pair(
+               Angle(m_x[1] + x_b * dt + x_a * dt * dt).Degrees(),
+               m_y[1] + y_b * dt + y_a * dt * dt
+           );
+}
+
+std::pair<double, double> ParabolicWindow::rateAt(double JD)
+{
+    advanceTo(JD);
+
+    double T  = m_step * 86400.0;
+    double dt = (JD - m_JD[1]) * 86400.0;
+    auto coeffs = coefficients(
+                      m_x[0], m_x[1], m_x[2],
+                      m_y[0], m_y[1], m_y[2], T);
+
+    double x_b = std::get<0>(coeffs);
+    double x_a = std::get<1>(coeffs);
+    double y_b = std::get<2>(coeffs);
+    double y_a = std::get<3>(coeffs);
+
+    return std::make_pair(
+               x_b + 2 * x_a * dt,   // dx/dt at JD, deg/s
+               y_b + 2 * y_a * dt    // dy/dt at JD, deg/s
+           );
+}
+
+/////////////////////////////////////////////////////////////////////
+
 // Angle implementation
 
 Angle::Angle(double value, ANGLE_UNITS type)

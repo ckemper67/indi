@@ -38,10 +38,64 @@
 #include <stdint.h>
 #include <sys/time.h>
 #include <cmath>
+#include <functional>
+#include <tuple>
+#include <utility>
 
 #include <indicom.h>
 
 extern char device_str[64];
+
+// A 3-point sliding parabolic window over any 2D quantity sampled at
+// evenly-spaced JD points.  x is treated as angular (wrapped to (-180,180]
+// relative to the centre sample); y is linear.
+//
+// Assumption: step size must be large enough that parabolic correction terms
+// stay within (-180, 180] deg — satisfied for all practical astronomical rates.
+class ParabolicWindow
+{
+    public:
+        using SampleFn = std::function<std::pair<double, double>(double JD)>;
+
+        ParabolicWindow() = default;
+        ParabolicWindow(SampleFn fn, double stepJD) : m_fn(std::move(fn)), m_step(stepJD) {}
+
+        // Compute all three samples centred on JDnow.
+        void prime(double JDnow);
+
+        // Parabolically-interpolated (x, y) at JD.
+        // Advances the window lazily; if JD is more than 3 steps ahead, re-primes
+        // to avoid unbounded catch-up loops after a driver pause.
+        std::pair<double, double> valueAt(double JD);
+
+        // First derivative (rate) of the parabola at JD, in units per second.
+        // Useful for feedforward rate computation.
+        std::pair<double, double> rateAt(double JD);
+
+        bool   isReady() const
+        {
+            return m_ready;
+        }
+        void   reset()
+        {
+            m_ready = false;
+        }
+        double step()    const
+        {
+            return m_step;
+        }
+
+    private:
+        void advance();
+        void advanceTo(double JD);  // shared guard used by valueAt and rateAt
+
+        SampleFn m_fn;
+        double   m_step { 0 };
+        mutable double m_x[3] { 0, 0, 0 };  // mutable: advance() is logically const
+        mutable double m_y[3] { 0, 0, 0 };
+        mutable double m_JD[3] { 0, 0, 0 };
+        bool     m_ready { false };
+};
 
 ///
 /// \brief The Angle class
@@ -61,9 +115,9 @@ class Angle
         ///
         static double range(double deg)
         {
-            while (deg > 180.0) deg -= 360.0;
-            while (deg <= -180.0) deg += 360.0;
-            return deg;
+            deg = fmod(deg + 180.0, 360.0);
+            if (deg <= 0) deg += 360.0;
+            return deg - 180.0;
         }
 
         static double hrstoDeg(double hrs)

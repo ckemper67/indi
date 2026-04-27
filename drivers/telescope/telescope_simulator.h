@@ -150,12 +150,16 @@ class ScopeSim : public INDI::Telescope, public INDI::GuiderInterface,
 
         Alignment alignment;
 
-        // Parabolic Alt-Az tracking window: three sky positions bracketing the current time,
-        // used to fit a 2nd-order polynomial for axis rate prediction.
-        INDI::IHorizontalCoordinates m_TrackingWindowCoords[3] {};
-        bool   m_IsPipelinePrimed { false };
-        double m_LastTrackingRA  { 0 };
-        double m_LastTrackingDec { 0 };
+        // Parabolic tracking windows: one for the Alt-Az servo (interpolation of Az/Alt),
+        // and one for ephemeris interpolation (Solar/Lunar RA/Dec drift).
+        ParabolicWindow m_altAzWindow;
+        ParabolicWindow m_ephemerisWindow;
+
+        // Last sampled center position of the ephemeris (JNow hours/deg).
+        // Used to compute the delta to apply to the current target.
+        double m_lastEphemRA  { 0 };
+        double m_lastEphemDec { 0 };
+        bool   m_ephemPrimed  { false };
 
         bool updateMountAndPierSide();
 

@@ -23,6 +23,8 @@
 #include "lilxml.h"
 
 #include <libnova/julian_day.h>
+#include <libnova/solar.h>
+#include <libnova/lunar.h>
 
 using namespace INDI::AlignmentSubsystem;
 
@@ -333,83 +335,91 @@ void ScopeSim::setTargetFromAxisPosition(Angle primary, Angle secondary)
     alignment.mountToInstrumentHaDec(primary, secondary, &instHA, &instDec);
     m_targetRA  = (alignment.lst() - instHA).Hours();
     m_targetDEC = instDec.Degrees();
+    m_altAzWindow.reset();
+    m_ephemerisWindow.reset();
+    m_ephemPrimed = false;
 }
 
 bool ScopeSim::ReadScopeStatus()
 {
-    if (m_MountType == Alignment::MOUNT_TYPE::ALTAZ && TrackState == SCOPE_TRACKING &&
-            TrackModeSP.findOnSwitchIndex() != TRACK_CUSTOM)
+    double JDnow = ln_get_julian_from_sys();
+
+    if (TrackState == SCOPE_TRACKING && TrackModeSP.findOnSwitchIndex() != TRACK_CUSTOM)
     {
-        double dt      = getCurrentPollingPeriod() / 1000.0;
-        double JDnow   = ln_get_julian_from_sys();
-        double JDoffset = dt / 86400.0;
-
-        // RA drift rate relative to sidereal for the selected track mode, in hours/sec.
-        // Nudging RA at each parabola sample by the non-sidereal offset makes the
-        // derived Az/Alt rates correct for the track mode without changing the meaning
-        // of m_targetRA/Dec.  Mirrors EQ behaviour: RA is corrected, Dec is not.
         int trackMode = TrackModeSP.findOnSwitchIndex();
-        double raDriftHrsPerSec = 0;
-        if (trackMode == TRACK_SOLAR)
-            raDriftHrsPerSec = (TRACKRATE_SIDEREAL - TRACKRATE_SOLAR) / 3600.0 / 15.0;
-        else if (trackMode == TRACK_LUNAR)
-            raDriftHrsPerSec = (TRACKRATE_SIDEREAL - TRACKRATE_LUNAR) / 3600.0 / 15.0;
 
-        auto getAltAz = [&](double JD, INDI::IHorizontalCoordinates & coords)
+            // Step 1: Ephemeris Window (Solar/Lunar drift rates)
+        if (trackMode == TRACK_SOLAR || trackMode == TRACK_LUNAR)
         {
-            double dtFromNow = (JD - JDnow) * 86400.0;
-            INDI::IEquatorialCoordinates eq { m_targetRA + raDriftHrsPerSec * dtFromNow, m_targetDEC };
-            INDI::EquatorialToHorizontal(&eq, &m_Location, JD, &coords);
-        };
+            if (!m_ephemerisWindow.isReady())
+            {
+                auto ephemFn = [trackMode](double JD) -> std::pair<double, double>
+                {
+                    ln_equ_posn epochPos;
+                    if (trackMode == TRACK_SOLAR)
+                        ln_get_solar_equ_coords(JD, &epochPos);
+                    else
+                        ln_get_lunar_equ_coords(JD, &epochPos);
 
-        bool targetChanged = std::abs(m_LastTrackingRA  - m_targetRA)  > 1e-6 ||
-                             std::abs(m_LastTrackingDec - m_targetDEC) > 1e-6;
+                    return { epochPos.ra / 15.0, epochPos.dec };
+                };
+                m_ephemerisWindow = ParabolicWindow(ephemFn, 30.0 / 86400.0);
+                m_ephemerisWindow.prime(JDnow);
+            }
 
-        if (!m_IsPipelinePrimed || targetChanged)
-        {
-            getAltAz(JDnow - JDoffset, m_TrackingWindowCoords[0]);
-            getAltAz(JDnow,            m_TrackingWindowCoords[1]);
-            getAltAz(JDnow + JDoffset, m_TrackingWindowCoords[2]);
-            m_IsPipelinePrimed = true;
-            m_LastTrackingRA   = m_targetRA;
-            m_LastTrackingDec  = m_targetDEC;
+            // Apply the delta of the ephemeris center since the last tick to our target.
+            // This preserves any offset (e.g. tracking a crater) naturally.
+            std::pair<double, double> center = m_ephemerisWindow.valueAt(JDnow);
+            if (m_ephemPrimed)
+            {
+                double deltaRA  = Angle(center.first - m_lastEphemRA, Angle::HOURS).HoursHa();
+                double deltaDec = center.second - m_lastEphemDec;
+                m_targetRA  = range24(m_targetRA  + deltaRA);
+                m_targetDEC = rangeDec(m_targetDEC + deltaDec);
+            }
+            m_lastEphemRA  = center.first;
+            m_lastEphemDec = center.second;
+            m_ephemPrimed  = true;
         }
-        else
+
+        // Step 2: Alt-Az Servo Window
+        if (m_MountType == Alignment::MOUNT_TYPE::ALTAZ)
         {
-            m_TrackingWindowCoords[0] = m_TrackingWindowCoords[1];
-            m_TrackingWindowCoords[1] = m_TrackingWindowCoords[2];
-            getAltAz(JDnow + JDoffset, m_TrackingWindowCoords[2]);
+            double dt = getCurrentPollingPeriod() / 1000.0;
+            double servoStepJD = 3.0 * dt / 86400.0;
+
+            if (!m_altAzWindow.isReady() || std::abs(m_altAzWindow.step() - servoStepJD) > 1e-9)
+            {
+                auto altAzFn = [this, JDnow](double JD) -> std::pair<double, double>
+                {
+                    INDI::IEquatorialCoordinates eq { m_targetRA, m_targetDEC };
+                    if (m_ephemerisWindow.isReady())
+                    {
+                        // Apply ephemeris drift rate as offset from the slewed-to target.
+                        // rateAt gives RA/Dec velocity at JDnow; integrate forward to JD.
+                        auto rates = m_ephemerisWindow.rateAt(JDnow);
+                        double dtFromNow = (JD - JDnow) * 86400.0;
+                        eq = { m_targetRA  + (rates.first / 15.0) * dtFromNow,
+                               m_targetDEC + rates.second         * dtFromNow };
+                    }
+                    INDI::IHorizontalCoordinates hor;
+                    INDI::EquatorialToHorizontal(&eq, &m_Location, JD, &hor);
+                    return { hor.azimuth, hor.altitude };
+                };
+                m_altAzWindow = ParabolicWindow(altAzFn, servoStepJD);
+                m_altAzWindow.prime(JDnow);
+            }
+
+            // Get predicted Az/Alt rates (deg/s) from the parabola derivative
+            auto rates = m_altAzWindow.rateAt(JDnow);
+
+            // Compute error-correction rate to close any lag in one polling period (dt)
+            auto targetPos = m_altAzWindow.valueAt(JDnow);
+            double azCorr  = Angle(targetPos.first  - m_currentAz).Degrees()  / dt;
+            double altCorr = Angle(targetPos.second - m_currentAlt).Degrees() / dt;
+
+            SetTrackRate((rates.first + azCorr) * 3600.0, (rates.second + altCorr) * 3600.0);
         }
-
-        // Unwrap azimuth around the center point to avoid 360/0 discontinuity
-        // Angle(x).Degrees() normalizes x to (-180, +180], same as the private Angle::range()
-        auto range180 = [](double x)
-        {
-            return Angle(x).Degrees();
-        };
-        double pAz[3] = { m_TrackingWindowCoords[0].azimuth,
-                          m_TrackingWindowCoords[1].azimuth,
-                          m_TrackingWindowCoords[2].azimuth
-                        };
-        pAz[0] = pAz[1] + range180(pAz[0] - pAz[1]);
-        pAz[2] = pAz[1] + range180(pAz[2] - pAz[1]);
-
-        // Parabolic coefficients (t in normalized units; points at t = -1, 0, +1)
-        double az_a  = (pAz[2] + pAz[0] - 2.0 * pAz[1]) / 2.0;
-        double az_b  = (pAz[2] - pAz[0]) / 2.0;
-        double alt_a = (m_TrackingWindowCoords[2].altitude + m_TrackingWindowCoords[0].altitude
-                        - 2.0 * m_TrackingWindowCoords[1].altitude) / 2.0;
-        double alt_b = (m_TrackingWindowCoords[2].altitude - m_TrackingWindowCoords[0].altitude) / 2.0;
-
-        // Predicted position at next tick (t = +1 normalized = +dt seconds from now)
-        double targetAzNext  = az_a  + az_b  + pAz[1];
-        double targetAltNext = alt_a + alt_b + m_TrackingWindowCoords[1].altitude;
-
-        // Rate to close the gap in exactly dt seconds, converted to arcsec/s for SetTrackRate
-        double azRate  = range180(targetAzNext - m_currentAz)  / dt * 3600.0;
-        double altRate = (targetAltNext - m_currentAlt) / dt * 3600.0;
-
-        SetTrackRate(azRate, altRate);
     }
 
     // new mechanical angle calculation
@@ -1136,19 +1146,23 @@ bool ScopeSim::SetTrackMode(uint8_t mode)
             axisPrimary.TrackRate(Axis::SIDEREAL);
             if (m_MountType != Alignment::MOUNT_TYPE::ALTAZ)
                 axisSecondary.TrackRate(Axis::OFF);
+            m_ephemerisWindow.reset();
             return true;
         case TRACK_SOLAR:
             axisPrimary.TrackRate(Axis::SOLAR);
             if (m_MountType != Alignment::MOUNT_TYPE::ALTAZ)
                 axisSecondary.TrackRate(Axis::OFF);
+            m_ephemerisWindow.reset();
             return true;
         case TRACK_LUNAR:
             axisPrimary.TrackRate(Axis::LUNAR);
             if (m_MountType != Alignment::MOUNT_TYPE::ALTAZ)
                 axisSecondary.TrackRate(Axis::OFF);
+            m_ephemerisWindow.reset();
             return true;
         case TRACK_CUSTOM:
             SetTrackRate(TrackRateNP[AXIS_RA].getValue(), TrackRateNP[AXIS_DE].getValue());
+            m_ephemerisWindow.reset();
             return true;
     }
     return false;
@@ -1156,8 +1170,8 @@ bool ScopeSim::SetTrackMode(uint8_t mode)
 
 bool ScopeSim::SetTrackEnabled(bool enabled)
 {
-    if (enabled)
-        m_IsPipelinePrimed = false;
+    m_altAzWindow.reset();
+    m_ephemerisWindow.reset();
     axisPrimary.Tracking(enabled);
     axisSecondary.Tracking(enabled);
     return true;

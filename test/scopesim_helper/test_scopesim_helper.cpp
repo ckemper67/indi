@@ -14,6 +14,10 @@
 #include <scopesim_helper.h>
 #include <telescope_simulator.h>
 
+#include <libnova/julian_day.h>
+#include <libnova/lunar.h>
+#include <libnova/solar.h>
+
 using ::testing::_;
 using ::testing::StrEq;
 
@@ -153,6 +157,164 @@ TEST(VectorTest, rotateZ)
     EXPECT_NEAR(v.secondary().Degrees(), 45, 0.00001);
 }
 
+// ParabolicWindow tests
+TEST(ParabolicWindowTest, SimpleParabola)
+{
+    // Test with x(t) = t^2, y(t) = 2*t + 5
+    // dt in seconds. JD step = 10s = 10/86400 days.
+    double step = 10.0 / 86400.0;
+    double JD0 = 0.0;
+    auto fn = [JD0](double JD) -> std::pair<double, double>
+    {
+        double t = (JD - JD0) * 86400.0;
+        return { t * t, 2 * t + 5 };
+    };
+
+    ParabolicWindow win(fn, step);
+    win.prime(JD0);
+
+    // Midpoint: t=0 relative to JD0.  Value should be exact.
+    auto val = win.valueAt(JD0);
+    EXPECT_NEAR(val.first,  0.0, 1e-7);
+    EXPECT_NEAR(val.second, 5.0, 1e-7);
+
+    // Quarter step: t = 2.5s -> x = 6.25, y = 10
+    auto val2 = win.valueAt(JD0 + 2.5 / 86400.0);
+    EXPECT_NEAR(val2.first,  6.25, 1e-7);
+    EXPECT_NEAR(val2.second, 10.0, 1e-7);
+
+    // Rate: dx/dt = 2*t, dy/dt = 2
+    // At t=5.0s, dx/dt = 10.0, dy/dt = 2.0
+    auto rate = win.rateAt(JD0 + 5.0 / 86400.0);
+    EXPECT_NEAR(rate.first,  10.0, 1e-7);
+    EXPECT_NEAR(rate.second, 2.0, 1e-7);
+}
+
+TEST(ParabolicWindowTest, AngularWrapping)
+{
+    // Test linear drift crossing 180 degrees.
+    // x(t) = 175 + 2*t (deg)
+    double step = 10.0 / 86400.0;
+    double JD0 = 0.0;
+    auto fn = [JD0](double JD) -> std::pair<double, double>
+    {
+        double t = (JD - JD0) * 86400.0;
+        return { Angle(175.0 + 2 * t).Degrees(), 0 };
+    };
+
+    ParabolicWindow win(fn, step);
+    win.prime(JD0);
+
+    // At t=0, x=175.
+    EXPECT_NEAR(win.valueAt(JD0).first, 175.0, 1e-7);
+
+    // At t=5s, x=185 -> -175.
+    EXPECT_NEAR(win.valueAt(JD0 + 5.0 / 86400.0).first, -175.0, 1e-7);
+
+    // Rate should be constant 2.0 deg/s even across the wrap.
+    EXPECT_NEAR(win.rateAt(JD0 + 2.5 / 86400.0).first, 2.0, 1e-7);
+    EXPECT_NEAR(win.rateAt(JD0 + 7.5 / 86400.0).first, 2.0, 1e-7);
+}
+
+TEST(ParabolicWindowTest, LunarTracking)
+{
+    // Source of truth: libnova lunar ephemeris.
+    // The driver uses a 30s step for ephemeris interpolation.
+    double step = 30.0 / 86400.0;
+    auto lunarFn = [](double JD) -> std::pair<double, double>
+    {
+        ln_equ_posn epochPos;
+        ln_get_lunar_equ_coords(JD, &epochPos);
+
+        // Mirror driver logic: convert JNow to J2000 hours/deg
+        INDI::IEquatorialCoordinates epochEq = { epochPos.ra / 15.0, epochPos.dec };
+        INDI::IEquatorialCoordinates J2000Eq;
+        INDI::ObservedToJ2000(&epochEq, JD, &J2000Eq);
+        return { J2000Eq.rightascension, J2000Eq.declination };
+    };
+
+    ParabolicWindow win(lunarFn, step);
+    double JD_start = 2461148.5; // Example JD
+    win.prime(JD_start);
+
+    // Track for 10 minutes (600 seconds) at 1-second intervals.
+    // The ParabolicWindow should advance its internal 30s samples automatically.
+    for (int s = 0; s <= 600; ++s)
+    {
+        double JD = JD_start + s / 86400.0;
+        auto interpolated = win.valueAt(JD);
+        auto truth        = lunarFn(JD);
+
+        double raDiff  = Angle(interpolated.first - truth.first, Angle::HOURS).Degrees() * 3600.0;
+        double decDiff = (interpolated.second - truth.second) * 3600.0;
+        double residual = std::sqrt(raDiff * raDiff + decDiff * decDiff);
+
+        // A 30s parabolic fit should be extremely accurate (well under 0.1 arcsec).
+        EXPECT_LT(residual, 0.1) << "Lunar tracking residual exceeded 0.1\" at second " << s
+                                 << " (residual=" << residual << "\")";
+    }
+}
+
+TEST(ParabolicWindowTest, FeatureTracking)
+{
+    // Test that we can track a specific "feature" (crater) at an offset from the Moon.
+    // The driver applies the Moon's *center delta* to the current target RA/Dec.
+    double step = 30.0 / 86400.0;
+    auto lunarFn = [](double JD) -> std::pair<double, double>
+    {
+        ln_equ_posn epochPos;
+        ln_get_lunar_equ_coords(JD, &epochPos);
+        return { epochPos.ra / 15.0, epochPos.dec }; // JNow hours/deg
+    };
+
+    ParabolicWindow win(lunarFn, step);
+    double JD_start = 2461148.5;
+    win.prime(JD_start);
+
+    // Feature is 10 arcmin North and 10 arcmin West of the initial Moon center.
+    auto moonStart = lunarFn(JD_start);
+    double initialRA  = moonStart.first  - (10.0 / 60.0 / 15.0 / std::cos(DEG_TO_RAD(moonStart.second)));
+    double initialDec = moonStart.second + (10.0 / 60.0);
+
+    double trackedRA  = initialRA;
+    double trackedDec = initialDec;
+    double lastEphemRA = moonStart.first;
+    double lastEphemDec = moonStart.second;
+
+    // Track for 10 minutes, applying the driver's delta update logic each second.
+    for (int s = 1; s <= 600; ++s)
+    {
+        double JD = JD_start + s / 86400.0;
+
+        // Current ephemeris center
+        auto center = win.valueAt(JD);
+
+        // Apply positional delta of the center to our tracked feature
+        double deltaRA  = Angle(center.first - lastEphemRA, Angle::HOURS).HoursHa();
+        double deltaDec = center.second - lastEphemDec;
+
+        trackedRA  = range24(trackedRA  + deltaRA);
+        trackedDec = rangeDec(trackedDec + deltaDec);
+
+        // Update state for next tick
+        lastEphemRA = center.first;
+        lastEphemDec = center.second;
+
+        // Verify tracked feature still has the same offset relative to the new Moon center
+        auto moonNow = lunarFn(JD);
+
+        double raOffsetNow  = Angle(trackedRA - moonNow.first, Angle::HOURS).Degrees() * 60.0 * std::cos(DEG_TO_RAD(moonNow.second));
+        double decOffsetNow = (trackedDec - moonNow.second) * 60.0;
+
+        // The delta-based approach is mathematically robust, but because RA lines converge
+        // towards the poles, a constant RA offset physically shrinks as Declination changes.
+        // Over 10 minutes of lunar tracking, this geometric effect causes a ~0.002 arcmin
+        // (0.12 arcsec) drift in the physical RA offset. We use a 0.01 arcmin (0.6 arcsec) tolerance.
+        EXPECT_NEAR(raOffsetNow,  -10.0, 0.01) << "RA Offset drifted at second " << s;
+        EXPECT_NEAR(decOffsetNow,  10.0, 0.01) << "Dec Offset drifted at second " << s;
+    }
+}
+
 // Alignment tests
 // the tuple contains:
 // Test Ha, Ra, primary, azimuth angle
@@ -173,8 +335,8 @@ class AlignmentTest : public ::testing::Test
 
 TEST_F(AlignmentTest, Create)
 {
-    EXPECT_EQ(alignment.latitude.Degrees(), 51.6);
-    EXPECT_EQ(alignment.longitude.Degrees(), -0.73);
+    EXPECT_NEAR(alignment.latitude.Degrees(), 51.6, 0.00001);
+    EXPECT_NEAR(alignment.longitude.Degrees(), -0.73, 0.00001);
 
     EXPECT_EQ(alignment.mountType, Alignment::MOUNT_TYPE::EQ_FORK);
 }
