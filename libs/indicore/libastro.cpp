@@ -68,6 +68,11 @@ void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinat
     getEngine().EquatorialToHorizontal(object, observer, JD, position);
 }
 
+void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed)
+{
+    getEngine().GetPlanetObserved(np, jd, observed);
+}
+
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position)
 {

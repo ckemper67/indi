@@ -105,6 +105,14 @@ void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinat
                             IHorizontalCoordinates *position);
 
 /**
+ * @brief GetPlanetObserved Calculate planetary equatorial coordinates.
+ * @param np Body identifier: 1=Mercury, 2=Venus, 3=Moon, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus, 8=Neptune, else=Sun.
+ * @param jd Julian Date.
+ * @param observed Calculated observed coordinates (RA hours, DE degrees).
+ */
+void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed);
+
+/**
  * @brief HorizontalToEquatorial Calculate Equatorial EOD Coordinates from horizontal coordinates
  * @param object Horizontal Object Coordinates
  * @param observer Observer Location in INDI Standard (Longitude 0 to 360 Increasing Eastward)

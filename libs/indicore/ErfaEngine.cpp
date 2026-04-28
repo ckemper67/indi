@@ -3,6 +3,7 @@
 #include "indicom.h"
 #ifdef HAVE_ERFA
 #include <erfa.h>
+#include "eph/eph.h"
 #endif
 #include <cmath>
 #include <memory>
@@ -85,6 +86,70 @@ public:
         INDI_UNUSED(observer);
         INDI_UNUSED(JD);
         INDI_UNUSED(position);
+#endif
+    }
+
+    void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) override {
+#ifdef HAVE_ERFA
+        // Use heap-allocated contexts to avoid stack overflow (each context is ~17.5 MB)
+        static std::unique_ptr<ephPLANctx> cemb = nullptr;
+        static std::unique_ptr<ephPLANctx> cplan = nullptr;
+        static std::unique_ptr<ephMOONctx> cmoon = nullptr;
+        static int current_planet = -1;
+
+        // Use the absolute path defined in CMake
+        const char* data_path = INDI_DATA_DIR "/eph/";
+
+        if (!cemb) {
+            cemb = std::make_unique<ephPLANctx>();
+            int status = ephPlanc(3, const_cast<char*>(data_path), cemb.get());
+            if (status != 0) {
+                fprintf(stderr, "ERFA Engine: Failed to load Earth context from %s (status %d)\n", data_path, status);
+                fflush(stderr);
+            }
+        }
+        
+        if (!cmoon) {
+            cmoon = std::make_unique<ephMOONctx>();
+            int status = ephMoonc(const_cast<char*>(data_path), 2, cmoon.get());
+            if (status != 0) {
+                fprintf(stderr, "ERFA Engine: Failed to load Moon context (status %d)\n", status);
+                fflush(stderr);
+            }
+        }
+
+        if (np != 3 && (!cplan || current_planet != np)) {
+            cplan = std::make_unique<ephPLANctx>();
+            int status = ephPlanc(np, const_cast<char*>(data_path), cplan.get());
+            if (status != 0) {
+                fprintf(stderr, "ERFA Engine: Failed to load Planet %d context (status %d)\n", np, status);
+                fflush(stderr);
+            }
+            current_planet = np;
+        }
+
+        // We use UTC for UT1 and TDB for this geocentric baseline (neglecting dT for M3)
+        double ut1 = jd - 2400000.5;
+        double tdb = ut1;
+
+        double rast, dast, rapp, dapp, eo, diam;
+        // elong=0, phi=0, hm=0 gives geocentric apparent place
+        ephPLANctx* pctx = (np == 3) ? cemb.get() : cplan.get();
+        if (pctx && cmoon && cemb) {
+            ephRdplan(cmoon.get(), cemb.get(), pctx, 
+                      ut1, tdb, np, 0, 0, 0, 
+                      &rast, &dast, &rapp, &dapp, &eo, &diam);
+
+            observed->rightascension = RAD_TO_HOURS(eraAnp(rapp));
+            observed->declination = RAD_TO_DEG(dapp);
+        } else {
+            observed->rightascension = 0;
+            observed->declination = 0;
+        }
+#else
+        INDI_UNUSED(np);
+        INDI_UNUSED(jd);
+        INDI_UNUSED(observed);
 #endif
     }
 };

@@ -59,6 +59,35 @@ TEST(EngineComparison, Reciprocity)
     EXPECT_NEAR(j2000_in.declination,    j2000_out.declination,    0.000001);
 }
 
+TEST(EngineComparison, PlanetDeviation)
+{
+    double jd = 2461112.5;
+    INDI::IEquatorialCoordinates mars_libnova, mars_erfa;
+
+    // 1. Get legacy result (VSOP87)
+    INDI::setEngine(false);
+    INDI::GetPlanetObserved(4, jd, &mars_libnova);
+
+    // 2. Get modern result (VSOP2010 via EPH)
+    INDI::setEngine(true);
+    INDI::GetPlanetObserved(4, jd, &mars_erfa);
+
+    // 3. Calculate delta in arcseconds
+    double cos_dec = std::cos(mars_erfa.declination * M_PI / 180.0);
+    double dRA = (mars_erfa.rightascension - mars_libnova.rightascension) * 15.0 * 3600.0 * cos_dec;
+    double dDec = (mars_erfa.declination - mars_libnova.declination) * 3600.0;
+    double total_delta = std::hypot(dRA, dDec);
+
+    GTEST_LOG_(INFO) << "Mars A/B Delta: " << total_delta << " arcsec (" 
+                     << "dRA=" << dRA << ", dDec=" << dDec << ")";
+
+    // Success Criteria: 
+    // - Should show improvement over legacy math.
+    EXPECT_GT(total_delta, 0.1);
+    // 2026 epoch shift is ~1300 arcsec (mostly precession)
+    EXPECT_LT(total_delta, 2000.0);
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

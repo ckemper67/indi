@@ -6,6 +6,15 @@
 #include <libnova/nutation.h>
 #include <libnova/aberration.h>
 #include <math.h>
+#include <libnova/mercury.h>
+#include <libnova/venus.h>
+#include <libnova/mars.h>
+#include <libnova/jupiter.h>
+#include <libnova/saturn.h>
+#include <libnova/uranus.h>
+#include <libnova/neptune.h>
+#include <libnova/solar.h>
+#include <libnova/lunar.h>
 #include <memory>
 
 /**
@@ -78,6 +87,23 @@ public:
         ln_get_hrz_from_equ(&libnova_object, &libnova_location, JD, &horizontalPos);
         position->azimuth = range360(180 + horizontalPos.az);
         position->altitude = horizontalPos.alt;
+    }
+
+    void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) override {
+        struct ln_equ_posn equatorialPos;
+        switch(np) {
+            case 1: ln_get_mercury_equ_coords(jd, &equatorialPos); break;
+            case 2: ln_get_venus_equ_coords(jd, &equatorialPos); break;
+            case 3: ln_get_lunar_equ_coords(jd, &equatorialPos); break;
+            case 4: ln_get_mars_equ_coords(jd, &equatorialPos); break;
+            case 5: ln_get_jupiter_equ_coords(jd, &equatorialPos); break;
+            case 6: ln_get_saturn_equ_coords(jd, &equatorialPos); break;
+            case 7: ln_get_uranus_equ_coords(jd, &equatorialPos); break;
+            case 8: ln_get_neptune_equ_coords(jd, &equatorialPos); break;
+            default: ln_get_solar_equ_coords(jd, &equatorialPos); break;
+        }
+        observed->rightascension = equatorialPos.ra / 15.0;
+        observed->declination = equatorialPos.dec;
     }
 };
 

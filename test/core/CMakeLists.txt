@@ -56,6 +56,23 @@ TARGET_LINK_LIBRARIES(test_engine_comparison
 )
 ADD_TEST(test_engine_comparison test_engine_comparison)
 
+SET (test_eph_library_SRCS
+    test_eph_library.cpp
+)
+ADD_EXECUTABLE(test_eph_library
+    ${test_eph_library_SRCS}
+)
+TARGET_LINK_LIBRARIES(test_eph_library
+    eph
+    PkgConfig::ERFA
+    ${GTEST_BOTH_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+# Ensure it gets the same data dir definition
+TARGET_COMPILE_DEFINITIONS(test_eph_library PRIVATE INDI_DATA_DIR="${CMAKE_SOURCE_DIR}/libs/indicore")
+
+ADD_TEST(test_eph_library test_eph_library)
+
 SET (test_rotator_limits_SRCS
     test_rotator_limits.cpp
 )

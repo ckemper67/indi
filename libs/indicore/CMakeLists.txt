@@ -6,8 +6,6 @@ endif()
 
 if(NOT WIN32)
     find_package(Nova)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(ERFA IMPORTED_TARGET erfa)
 endif()
 
 add_library(${PROJECT_NAME} OBJECT "")
@@ -65,6 +63,7 @@ target_compile_definitions(${PROJECT_NAME}
     $<$<BOOL:${ERFA_FOUND}>:HAVE_ERFA>
     $<$<BOOL:${HAVE_TIMESPEC_GET}>:HAVE_TIMESPEC_GET>
     $<$<BOOL:${HAVE_CLOCK_GETTIME}>:HAVE_CLOCK_GETTIME>
+    INDI_DATA_DIR="${CMAKE_SOURCE_DIR}/libs/indicore"
 )
 if(NOVA_FOUND)
     target_link_libraries(${PROJECT_NAME} ${NOVA_LIBRARIES})
@@ -82,6 +81,9 @@ if(NOVA_FOUND)
         LibnovaEngine.cpp
         ErfaEngine.cpp
     )
+
+    add_subdirectory(eph)
+    target_link_libraries(${PROJECT_NAME} eph)
 endif()
 
 # Setup Target
