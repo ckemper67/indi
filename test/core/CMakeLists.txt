@@ -28,6 +28,34 @@ TARGET_LINK_LIBRARIES(test_property_class
 )
 ADD_TEST(test_property_class test_property_class)
 
+SET (test_libastro_regression_SRCS
+    test_libastro_regression.cpp
+)
+ADD_EXECUTABLE(test_libastro_regression
+    ${test_libastro_regression_SRCS}
+)
+TARGET_LINK_LIBRARIES(test_libastro_regression
+    indidriver
+    ${GTEST_BOTH_LIBRARIES}
+    ${GMOCK_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+ADD_TEST(test_libastro_regression test_libastro_regression)
+
+SET (test_engine_comparison_SRCS
+    test_engine_comparison.cpp
+)
+ADD_EXECUTABLE(test_engine_comparison
+    ${test_engine_comparison_SRCS}
+)
+TARGET_LINK_LIBRARIES(test_engine_comparison
+    indidriver
+    ${GTEST_BOTH_LIBRARIES}
+    ${GMOCK_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+ADD_TEST(test_engine_comparison test_engine_comparison)
+
 SET (test_rotator_limits_SRCS
     test_rotator_limits.cpp
 )

@@ -6,6 +6,8 @@ endif()
 
 if(NOT WIN32)
     find_package(Nova)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(ERFA IMPORTED_TARGET erfa)
 endif()
 
 add_library(${PROJECT_NAME} OBJECT "")
@@ -60,11 +62,15 @@ endif()
 target_compile_definitions(${PROJECT_NAME}
   PUBLIC
     $<$<BOOL:${NOVA_FOUND}>:HAVE_LIBNOVA>
+    $<$<BOOL:${ERFA_FOUND}>:HAVE_ERFA>
     $<$<BOOL:${HAVE_TIMESPEC_GET}>:HAVE_TIMESPEC_GET>
     $<$<BOOL:${HAVE_CLOCK_GETTIME}>:HAVE_CLOCK_GETTIME>
 )
 if(NOVA_FOUND)
     target_link_libraries(${PROJECT_NAME} ${NOVA_LIBRARIES})
+    if(ERFA_FOUND)
+        target_link_libraries(${PROJECT_NAME} PkgConfig::ERFA)
+    endif()
     target_include_directories(${PROJECT_NAME} PRIVATE ${NOVA_INCLUDE_DIR})
 
     list(APPEND ${PROJECT_NAME}_HEADERS
@@ -73,6 +79,8 @@ if(NOVA_FOUND)
 
     list(APPEND ${PROJECT_NAME}_SOURCES
         libastro.cpp
+        LibnovaEngine.cpp
+        ErfaEngine.cpp
     )
 endif()
 

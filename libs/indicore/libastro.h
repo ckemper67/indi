@@ -123,4 +123,10 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 */
 void ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse = false);
 
+/**
+ * @brief Select the coordinate engine to use (legacy Libnova or modern ERFA).
+ * @param erfa True to use ERFA, false for Libnova.
+ */
+void setEngine(bool erfa);
+
 }
