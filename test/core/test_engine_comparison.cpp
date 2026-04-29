@@ -78,9 +78,9 @@ TEST(EngineComparison, PlanetDeviation)
     double jd = 2459019.833333;
     INDI::IEquatorialCoordinates mars_libnova, mars_full, mars_indi;
 
-    // JPL Horizons Truth for Mars at JD 2459019.833333
-    const double RA_TRUTH = 23.7442125;
-    const double DEC_TRUTH = -4.7558155;
+    // JPL Horizons DE440 geocentric apparent (from test/data/planet_golden.json)
+    const double RA_TRUTH  = 356.16466 / 15.0;  // hours
+    const double DEC_TRUTH = -4.75544;
 
     auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
         double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
@@ -117,9 +117,8 @@ TEST(EngineComparison, PlanetDeviation)
     GTEST_LOG_(INFO) << "  EPH_INDI:  " << error_indi    << " arcsec";
     GTEST_LOG_(INFO) << "  FULL vs INDI delta: " << delta_full_indi << " arcsec";
 
-    // VSOP2010 was fitted to DE405; vs DE440 geocentric errors are larger (~5-10")
     EXPECT_GT(error_libnova, 1000.0);
-    EXPECT_LT(error_full, 15.0);
+    EXPECT_LT(error_full, 1.0);   // EPH vs DE440 geocentric; ~0.25" observed
     EXPECT_LT(error_indi, 0.04 + error_full);   // truncation adds at most 0.04"
     EXPECT_LT(delta_full_indi, 0.04);
 }

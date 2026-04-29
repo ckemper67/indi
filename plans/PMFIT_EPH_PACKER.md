@@ -152,10 +152,10 @@ Replace the placeholder in `EphEngine.cpp`:
 
 | Engine | Error vs JPL | FULL vs INDI delta |
 |--------|-------------|-------------------|
-| EPH_FULL | 5.70" | — |
-| EPH_INDI | 5.70" | 0.003" |
+| EPH_FULL | 0.26" | — |
+| EPH_INDI | 0.26" | 0.003" |
 
-Note: the previous 0.73" Mars error was an artifact of applying topocentric parallax for an observer at lat=0/lon=0 (`hm=0`). Correct geocentric output (`hm=-1e6`) gives 5.70", which reflects VSOP2010's actual accuracy vs DE440 (theory was fitted to DE405).
+Note: the original test showed 0.73" vs a reference that was obtained from a Horizons query without a properly geocentric center (effectively topocentric at lat=0/lon=0), which happened to agree with the `hm=0` bug. With both the engine and the reference correctly geocentric, the actual accuracy is 0.26" for Mars and 0.25" for the Moon.
 
 **Criteria met**:
 - `EphEngineINDI` vs `EphEngineFull` delta: **0.003"** < 0.04" budget
