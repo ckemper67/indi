@@ -5,10 +5,16 @@
 **  thresholds and estimate resulting .ictx file sizes.
 **
 **  Usage:
-**     eph_threshold_analysis <ctx_dir>
+**     eph_threshold_analysis <ctx_dir> [max_tm]
 **
-**  Requires VSOP2010_#.ctx files (produced by plan_bin or distributed
-**  with the EPH library). Prints a table of:
+**  Arguments:
+**     ctx_dir  directory containing VSOP2010_#.ctx files
+**     max_tm   epoch limit in Julian millennia from J2000 (default 0 = no
+**              time weighting).  When non-zero, a term at time power 'it'
+**              contributes hypot(ss,cc)*max_tm^it to the filter decision.
+**              Example: 0.2 covers +-200 years from J2000 (1800-2200).
+**
+**  Requires VSOP2010_#.ctx files. Prints a table of:
 **    threshold | body | terms_in | terms_out | ratio | est_MB
 **
 **  Copyright (C) 2025 INDI Contributors.
@@ -36,14 +42,28 @@ static const char* body_names[] = {
     "Jupiter", "Saturn", "Uranus", "Neptune"
 };
 
+static int survives(double ss, double cc, int it, double threshold, double max_tm)
+{
+    double amp = hypot(ss, cc);
+    if (max_tm == 0.0 || it == 0)
+        return amp >= threshold;
+    double tpow = pow(max_tm, (double)it);
+    return amp * tpow >= threshold;
+}
+
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <ctx_dir>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <ctx_dir> [max_tm]\n", argv[0]);
+        fprintf(stderr, "  max_tm  epoch limit in Julian millennia from J2000 (default 0 = no time weighting)\n");
         return 1;
     }
 
     const char* ctx_dir = argv[1];
+    double max_tm = (argc >= 3) ? atof(argv[2]) : 0.0;
+
+    if (max_tm != 0.0)
+        printf("Time weighting: max_tm=%.4g (%.0f yr from J2000)\n\n", max_tm, max_tm * 1000.0);
 
     ephPLANctx* c = malloc(sizeof(ephPLANctx));
     if (!c) { fprintf(stderr, "malloc failed\n"); return 1; }
@@ -75,8 +95,7 @@ int main(int argc, char* argv[])
                 for (it = 0; it <= MAXTIME; it++) {
                     int cnt = c->limit[it][iv];
                     for (n = 0; n < cnt; n++) {
-                        double amp = hypot(c->ss[nn], c->cc[nn]);
-                        if (threshold == 0.0 || amp >= threshold)
+                        if (threshold == 0.0 || survives(c->ss[nn], c->cc[nn], it, threshold, max_tm))
                             out_body++;
                         in_body++;
                         nn++;

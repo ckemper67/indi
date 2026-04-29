@@ -23,7 +23,7 @@ Each VSOP2010 term has a sine amplitude `ss[n]` and cosine amplitude `cc[n]` in 
 amplitude = hypot(ss[n], cc[n])
 ```
 
-Terms with `amplitude < threshold` are dropped. The threshold $10^{-10}$ AU is used (not $10^{-11}$ as originally estimated — see threshold analysis results below). The surviving terms are compacted in-place; the `limit[it][iv]` counts are updated to reflect the new term counts.
+Terms with effective amplitude below threshold are dropped. The filter is time-weighted: a term at time power `it` survives if `hypot(ss[n], cc[n]) * max_tm^it >= threshold`. This allows a higher amplitude threshold for terms that contribute negligibly at modern epochs. The surviving terms are compacted in-place; the `limit[it][iv]` counts are updated to reflect the new term counts.
 
 ---
 
@@ -41,7 +41,16 @@ Results (total across 8 planets):
 | 1e-11 | 459,303 | 18.9% | 22.97 |
 | 1e-12 | 1,016,490 | 41.8% | 50.83 |
 
-**Selected threshold: $10^{-10}$** (9.30 MB total, well under 12 MB target). The original estimate of $10^{-11}$ was wrong — it produces 23 MB.
+**Selected threshold: $10^{-9}$ with `max_tm=0.2`** (2.60 MB total). The time-weighted filter (`hypot(ss,cc) * max_tm^it >= threshold`) allows a higher amplitude threshold than the naive filter by accounting for the suppression of high time-power terms at modern epochs. `max_tm=0.2` covers ±200 years from J2000 (1800–2200). FULL vs INDI delta: 0.003". The systematic DE440 error (5.7" for Mars) dominates, making a tighter truncation budget unnecessary.
+
+Summary of candidates evaluated:
+
+| threshold | max_tm | size | FULL vs INDI delta |
+|-----------|--------|------|--------------------|
+| 1e-10 | none | 9.30 MB | 0.0006" |
+| 1e-10 | 0.2 | 6.52 MB | — |
+| 1e-9  | 0.2 | 2.60 MB | 0.003" |
+| 1e-8  | 0.2 | 1.00 MB | 0.043" (over budget) |
 
 ---
 
@@ -143,13 +152,16 @@ Replace the placeholder in `EphEngine.cpp`:
 
 | Engine | Error vs JPL | FULL vs INDI delta |
 |--------|-------------|-------------------|
-| EPH_FULL | 0.732" | — |
-| EPH_INDI | 0.732" | 0.000638" |
+| EPH_FULL | 5.70" | — |
+| EPH_INDI | 5.70" | 0.003" |
+
+Note: the previous 0.73" Mars error was an artifact of applying topocentric parallax for an observer at lat=0/lon=0 (`hm=0`). Correct geocentric output (`hm=-1e6`) gives 5.70", which reflects VSOP2010's actual accuracy vs DE440 (theory was fitted to DE405).
 
 **Criteria met**:
-- `EphEngineINDI` vs `EphEngineFull` delta: **0.000638"** < 0.04" budget
-- Total `.ictx` dataset (8 planets): **9.30 MB** < 12 MB target
+- `EphEngineINDI` vs `EphEngineFull` delta: **0.003"** < 0.04" budget
+- Total `.ictx` dataset (8 planets): **2.60 MB** (threshold 1e-9, max_tm=0.2)
 - `EphEngineINDI` falls back to `.ctx` gracefully when `.ictx` files are absent
+- Moon validated: ELP/MPP02 geocentric error **0.25"** vs DE440
 
 ---
 

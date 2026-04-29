@@ -71,13 +71,13 @@ The library is released under an ISC-style license: permission is granted to use
 |-------|---------|--------|-----------|--------|
 | `LibnovaPlanetaryEngine` | libnova | VSOP87 | ~1000" | Fallback |
 | `EphEngineFull` | EPH library | VSOP2010 (full) | ~0.73" geocentric | Available |
-| `EphEngineINDI` | EPH library | VSOP2010 (truncated, 9.3 MB) | +0.0006" vs EPH_FULL | Available |
+| `EphEngineINDI` | EPH library | VSOP2010 (truncated, 2.6 MB) | +0.003" vs EPH_FULL | Available |
 
 **Time conversion**: UTC → TAI → TT via `eraUtctai` + `eraTaitt`. TT is used as TDB (TDB-TT < 2ms geocentric). This corrects the ~69s UT1/TDB discrepancy present in the original implementation.
 
 **Context loading**: `EphEngineFull` holds the `.ctx` contexts as member variables. The Earth/EMB context and Moon context are loaded once on first use; the planet context is reloaded when `np` changes. Load failures are detected from `ephPlanc`/`ephMoonc` return values and cause an early return.
 
-**`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a $10^{-10}$ AU amplitude threshold, producing a 9.3 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.0006" for Mars at JD 2459019.833333.
+**`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a time-weighted amplitude filter: threshold $10^{-9}$ AU with `max_tm=0.2` (±200 yr from J2000), producing a 2.6 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.003" for Mars at JD 2459019.833333.
 
 ---
 
@@ -116,7 +116,7 @@ The split provides cross-validation between two independent ephemeris models (IN
 | ERFA-2000B | Deneb apparent position | 0.050" |
 | ERFA A vs B delta | — | 0.000264" |
 | libnova planetary | Mars geocentric (2020) | 1008" |
-| EPH-Full | Mars geocentric (2020) | 5.7" vs DE440 (VSOP2010 fitted to DE405) |
+| EPH-Full | Mars geocentric (2020) | 5.7" vs DE440 (VSOP2010 fitted to DE405; under investigation) |
 | EPH-Full | Moon geocentric (2020) | 0.25" vs DE440 |
 | EPH-INDI vs EPH-Full | Mars geocentric (2020) | 0.0006" |
 

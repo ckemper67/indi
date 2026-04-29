@@ -5,15 +5,20 @@
 **  VSOP2010 binary .ctx files.
 **
 **  Usage:
-**     indi_eph_packer <ctx_dir> <output_dir> [threshold]
+**     indi_eph_packer <ctx_dir> <output_dir> [threshold [max_tm]]
 **
 **  Arguments:
 **     ctx_dir     directory containing VSOP2010_#.ctx files
 **     output_dir  directory for output VSOP2010_#.ictx files
-**     threshold   amplitude filter (AU); default 1e-11
+**     threshold   amplitude filter (AU); default 1e-9
+**     max_tm      target epoch limit in Julian millennia from J2000;
+**                 default 0.0 (no time weighting).
+**                 When non-zero, a term at time power 'it' is kept only
+**                 if hypot(ss,cc) * max_tm^it >= threshold.
+**                 Example: 0.2 covers +-200 years from J2000 (1800-2200).
 **
-**  The .ictx format stores only VSOP2010 terms whose amplitude
-**  hypot(ss, cc) >= threshold, in a compact variable-length binary.
+**  The .ictx format stores only VSOP2010 terms whose effective amplitude
+**  survives the filter, in a compact variable-length binary.
 **  The loader ephPlanci() reads .ictx directly into ephPLANctx so
 **  ephPlanet / ephRdplan require no changes.
 **
@@ -31,8 +36,19 @@
 #define ICTX_MAGIC   0x49435458u   /* "ICTX" */
 #define ICTX_VERSION 1u
 
+/* Survival test: keep term if its contribution at max_tm is >= threshold.
+   When max_tm == 0.0, only raw amplitude is checked (no time weighting). */
+static int survives(double ss, double cc, int it, double threshold, double max_tm)
+{
+    double amp = hypot(ss, cc);
+    if (max_tm == 0.0 || it == 0)
+        return amp >= threshold;
+    double tpow = pow(max_tm, (double)it);
+    return amp * tpow >= threshold;
+}
+
 static int pack_planet(int ibody, const char* ctx_dir, const char* out_dir,
-                       double threshold, ephPLANctx* c)
+                       double threshold, double max_tm, ephPLANctx* c)
 {
     char ctx_path[512], out_path[512];
     snprintf(ctx_path, sizeof(ctx_path), "%s/", ctx_dir);
@@ -64,8 +80,7 @@ static int pack_planet(int ibody, const char* ctx_dir, const char* out_dir,
         for (it = 0; it <= MAXTIME; it++) {
             int cnt = c->limit[it][iv];
             for (n = 0; n < cnt; n++) {
-                double amp = hypot(c->ss[nn], c->cc[nn]);
-                if (amp >= threshold) {
+                if (survives(c->ss[nn], c->cc[nn], it, threshold, max_tm)) {
                     new_limit[it][iv]++;
                     total_out++;
                 }
@@ -91,8 +106,7 @@ static int pack_planet(int ibody, const char* ctx_dir, const char* out_dir,
         for (it = 0; it <= MAXTIME; it++) {
             int cnt = c->limit[it][iv];
             for (n = 0; n < cnt; n++) {
-                double amp = hypot(c->ss[nn], c->cc[nn]);
-                if (amp >= threshold) {
+                if (survives(c->ss[nn], c->cc[nn], it, threshold, max_tm)) {
                     memcpy(&iphi_out[ww * MAXARG], c->iphi[nn], MAXARG * sizeof(short));
                     ss_out[ww] = c->ss[nn];
                     cc_out[ww] = c->cc[nn];
@@ -165,15 +179,20 @@ static int pack_planet(int ibody, const char* ctx_dir, const char* out_dir,
 int main(int argc, char* argv[])
 {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <ctx_dir> <output_dir> [threshold]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <ctx_dir> <output_dir> [threshold [max_tm]]\n", argv[0]);
+        fprintf(stderr, "  threshold  amplitude filter in AU (default 1e-10)\n");
+        fprintf(stderr, "  max_tm     epoch limit in Julian millennia from J2000 (default 0 = no time weighting)\n");
+        fprintf(stderr, "             e.g. 0.2 covers +-200 yr from J2000\n");
         return 1;
     }
 
     const char* ctx_dir = argv[1];
     const char* out_dir = argv[2];
-    double threshold = (argc >= 4) ? atof(argv[3]) : 1e-11;
+    double threshold = (argc >= 4) ? atof(argv[3]) : 1e-9;
+    double max_tm    = (argc >= 5) ? atof(argv[4]) : 0.0;
 
-    printf("indi_eph_packer: threshold=%.2e\n", threshold);
+    printf("indi_eph_packer: threshold=%.2e  max_tm=%.4g%s\n",
+           threshold, max_tm, max_tm == 0.0 ? " (no time weighting)" : "");
     printf("  src: %s\n  dst: %s\n\n", ctx_dir, out_dir);
 
     ephPLANctx* c = malloc(sizeof(ephPLANctx));
@@ -182,7 +201,7 @@ int main(int argc, char* argv[])
     long total_bytes = 0;
     int ibody, failed = 0;
     for (ibody = 1; ibody <= 8; ibody++) {
-        int st = pack_planet(ibody, ctx_dir, out_dir, threshold, c);
+        int st = pack_planet(ibody, ctx_dir, out_dir, threshold, max_tm, c);
         if (st != 0) { failed++; continue; }
 
         /* accumulate output size */
