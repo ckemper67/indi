@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 #include <libastro.h>
 #include <indicom.h>
+#include <nlohmann/json.hpp>
 #include <cmath>
+#include <fstream>
+#include <string>
 
 /**
  * @brief Test Level 1: Mathematical Truth Validation
@@ -156,6 +159,58 @@ TEST(EngineComparison, MoonDeviation)
     // Moon uses ELP/MPP02 (same .ctx in both engines) — results must be identical
     EXPECT_LT(error_full, 20.0);   // ELP/MPP02 geocentric accuracy vs DE440
     EXPECT_NEAR(error_full, error_indi, 0.001);  // same loader, must match
+}
+
+// Validates EPH_FULL and EPH_INDI against JPL DE440 geocentric truth across
+// 11 epochs from 2000 to 2100 (every ~10 years) for Mars, Jupiter, Saturn, Moon.
+// Guards against time-dependent failures introduced by the time-weighted packing filter.
+TEST(EngineComparison, MultiEpochDeviation)
+{
+    std::ifstream f(TEST_DATA_DIR "/multi_epoch_golden.json");
+    ASSERT_TRUE(f.is_open()) << "Could not open multi_epoch_golden.json";
+    nlohmann::json golden = nlohmann::json::parse(f);
+
+    double max_err_full = 0, max_err_indi = 0, max_delta = 0;
+    int n = 0;
+
+    for (auto& entry : golden) {
+        std::string planet = entry["planet"];
+        int np      = entry["np"];
+        double jd   = entry["jd"];
+        double ra_truth  = static_cast<double>(entry["ra_deg"]) / 15.0;  // hours
+        double dec_truth = entry["dec_deg"];
+
+        INDI::IEquatorialCoordinates pos_full, pos_indi;
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
+        INDI::GetPlanetObserved(np, jd, &pos_full);
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
+        INDI::GetPlanetObserved(np, jd, &pos_indi);
+
+        double cos_dec = std::cos(dec_truth * M_PI / 180.0);
+        auto err = [&](INDI::IEquatorialCoordinates& pos) {
+            double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
+            double dDec = (pos.declination    - dec_truth) * 3600.0;
+            return std::hypot(dRA, dDec);
+        };
+        double delta = std::hypot(
+            (pos_full.rightascension - pos_indi.rightascension) * 15.0 * 3600.0 * cos_dec,
+            (pos_full.declination    - pos_indi.declination)    * 3600.0);
+
+        double ef = err(pos_full), ei = err(pos_indi);
+        max_err_full = std::max(max_err_full, ef);
+        max_err_indi = std::max(max_err_indi, ei);
+        max_delta    = std::max(max_delta, delta);
+
+        EXPECT_LT(ef, 2.0) << planet << " EPH_FULL at JD " << jd;
+        EXPECT_LT(ei, 2.0) << planet << " EPH_INDI at JD " << jd;
+        EXPECT_LT(delta, 0.1) << planet << " FULL vs INDI delta at JD " << jd;
+        n++;
+    }
+
+    GTEST_LOG_(INFO) << "Multi-epoch (" << n << " points): "
+                     << "max EPH_FULL=" << max_err_full << "\"  "
+                     << "max EPH_INDI=" << max_err_indi << "\"  "
+                     << "max delta=" << max_delta << "\"";
 }
 
 int main(int argc, char **argv)

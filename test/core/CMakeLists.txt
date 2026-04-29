@@ -54,6 +54,9 @@ TARGET_LINK_LIBRARIES(test_engine_comparison
     ${GMOCK_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
+TARGET_COMPILE_DEFINITIONS(test_engine_comparison PRIVATE
+    TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test/data"
+)
 ADD_TEST(test_engine_comparison test_engine_comparison)
 
 SET (test_eph_library_SRCS
