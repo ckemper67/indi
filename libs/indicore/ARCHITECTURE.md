@@ -72,7 +72,12 @@ All leaf functions called by the 2000B path (`eraEpv00`, `eraBpn2xy`, `eraApci`,
 
 **Time input**: JD is treated as UTC and split into a two-part Julian Date per ERFA convention (`utc1 = floor(jd) + 0.5`, `utc2 = jd - utc1`).
 
-**`EquatorialToHorizontal`**: uses `eraApco00b` + `eraAtioq`. The observer's longitude and latitude are used to compute local sidereal time and hour angle; no topocentric parallax is applied (geocentric CIRS input). Full topocentric support is planned for M5.
+**`EquatorialToHorizontal` — geocentric CIRS input, observer-local output**: uses `eraApco00b` + `eraAtioq`. This involves two conceptually distinct coordinate frames that are worth distinguishing:
+
+- The CIRS coordinates fed in (JNow RA/Dec) are **geocentric**: they were computed by `J2000toObserved` using `eraApci*`, which places the origin at the Earth's center with no observer offset.
+- `eraAtioq` with the `eraApco00b` context converts those geocentric CIRS coordinates to the **observer's local horizontal frame**, using the observer's longitude and latitude to compute local sidereal time and hence the local hour angle. This step is correct and necessary.
+
+There is no problematic mixing here — the observer location is required to rotate from CIRS to local horizontal, and `eraAtioq` does exactly that. The limitation is that no **topocentric parallax** is applied: the geocentric CIRS direction is not shifted by the geocenter-to-observer baseline (~6400 km). For stars and outer planets this shift is negligible. For the Moon (~57' parallax) and Sun (~9"), the horizontal position will be off by that amount. This is a known limitation to be addressed in M5 (topocentric promotion via `eraApco*` with full observer context through the entire pipeline).
 
 ### Planetary Engines (`libs/indicore/EphEngine.cpp`, `LibnovaEngine.cpp`)
 
