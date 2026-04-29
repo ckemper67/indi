@@ -8,6 +8,7 @@
 namespace INDI
 {
 
+static std::mutex s_engineMutex;
 static StellarEngine currentStellarType = StellarEngine::LIBNOVA;
 static PlanetaryEngine currentPlanetaryType = PlanetaryEngine::LIBNOVA;
 
@@ -15,16 +16,19 @@ static std::unique_ptr<ICoordinateEngine> stellarEngine = nullptr;
 static std::unique_ptr<IPlanetaryEngine> planetaryEngine = nullptr;
 
 void setStellarEngine(StellarEngine engine) {
+    std::lock_guard<std::mutex> lock(s_engineMutex);
     currentStellarType = engine;
-    stellarEngine.reset(); // Force re-init
+    stellarEngine.reset();
 }
 
 void setPlanetaryEngine(PlanetaryEngine engine) {
+    std::lock_guard<std::mutex> lock(s_engineMutex);
     currentPlanetaryType = engine;
-    planetaryEngine.reset(); // Force re-init
+    planetaryEngine.reset();
 }
 
 ICoordinateEngine& getStellarEngine() {
+    std::lock_guard<std::mutex> lock(s_engineMutex);
     if (!stellarEngine) {
         switch(currentStellarType) {
             case StellarEngine::ERFA_2000A: stellarEngine = createErfaEngine2000A(); break;
@@ -36,6 +40,7 @@ ICoordinateEngine& getStellarEngine() {
 }
 
 IPlanetaryEngine& getPlanetaryEngine() {
+    std::lock_guard<std::mutex> lock(s_engineMutex);
     if (!planetaryEngine) {
         switch(currentPlanetaryType) {
             case PlanetaryEngine::EPH_FULL: planetaryEngine = createEphEngineFull(); break;

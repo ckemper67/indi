@@ -28,13 +28,6 @@ static void eraAtci00b(double rc, double dc, double pr, double pd, double px, do
     eraAtciq(rc, dc, pr, pd, px, rv, &astrom, ri, di);
 }
 
-static void eraAtic00b(double ri, double di, double date1, double date2,
-                       double *rc, double *dc, double *eo)
-{
-    eraASTROM astrom;
-    eraApci00b(date1, date2, &astrom, eo);
-    eraAticq(ri, di, &astrom, rc, dc);
-}
 #endif
 
 class ErfaEngine2000A : public ICoordinateEngine {
@@ -62,7 +55,7 @@ public:
         double eo;
         eraApci13(utc1, utc2, &astrom, &eo);
         double ri, di;
-        eraAtic13(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, utc1, utc2, &ri, &di, &eo);
+        eraAticq(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, &astrom, &ri, &di);
         j2000->rightascension = RAD_TO_HOURS(eraAnp(ri));
         j2000->declination = RAD_TO_DEG(di);
 #else
@@ -73,6 +66,7 @@ public:
     void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IHorizontalCoordinates *position) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
+        INDI_UNUSED(observer); // geocentric only until M5 introduces ObservationContext
         eraASTROM astrom;
         double eo;
         eraApci13(utc1, utc2, &astrom, &eo);
@@ -114,7 +108,7 @@ public:
         double eo;
         eraApci00b(utc1, utc2, &astrom, &eo);
         double ri, di;
-        eraAtic00b(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, utc1, utc2, &ri, &di, &eo);
+        eraAticq(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, &astrom, &ri, &di);
         j2000->rightascension = RAD_TO_HOURS(eraAnp(ri));
         j2000->declination = RAD_TO_DEG(di);
 #else
@@ -124,6 +118,7 @@ public:
 
     void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IHorizontalCoordinates *position) override {
 #ifdef HAVE_ERFA
+        INDI_UNUSED(observer); // geocentric only until M5 introduces ObservationContext
         double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
         eraASTROM astrom;
         double eo;

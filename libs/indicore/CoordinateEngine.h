@@ -34,19 +34,6 @@ public:
                                         INDI::IHorizontalCoordinates *position) = 0;
 };
 
-// Engine selection types
-enum class StellarEngineType {
-    LIBNOVA,
-    ERFA_2000A, // Full IAU 2000A (1,365 terms)
-    ERFA_2000B  // Lite IAU 2000B (77 terms)
-};
-
-enum class PlanetaryEngineType {
-    LIBNOVA,      // VSOP87
-    EPH_FULL,     // VSOP2010 (140MB)
-    EPH_INDI      // VSOP2010-INDI (~12MB)
-};
-
 // Factory functions for Stellar Engines
 std::unique_ptr<ICoordinateEngine> createLibnovaStellarEngine();
 std::unique_ptr<ICoordinateEngine> createErfaEngine2000A();

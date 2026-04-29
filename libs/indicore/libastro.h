@@ -128,6 +128,8 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 * \param posn position, nutation is applied or removed in place
 * \param jd
 * \param reverse  set to true to remove nutation
+* TODO: this exposes ln_equ_posn (a libnova type) in the public API — revisit
+* when libnova is fully decoupled from the coordinate engine layer.
 */
 void ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse = false);
 
