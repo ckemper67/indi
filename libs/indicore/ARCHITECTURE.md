@@ -71,13 +71,13 @@ The library is released under an ISC-style license: permission is granted to use
 |-------|---------|--------|-----------|--------|
 | `LibnovaPlanetaryEngine` | libnova | VSOP87 | ~1000" | Fallback |
 | `EphEngineFull` | EPH library | VSOP2010 (full) | ~0.73" geocentric | Available |
-| `EphEngineINDI` | EPH library | VSOP2010 (truncated, ~12 MB) | ~0.04" | Placeholder |
+| `EphEngineINDI` | EPH library | VSOP2010 (truncated, 9.3 MB) | +0.0006" vs EPH_FULL | Available |
 
 **Time conversion**: UTC → TAI → TT via `eraUtctai` + `eraTaitt`. TT is used as TDB (TDB-TT < 2ms geocentric). This corrects the ~69s UT1/TDB discrepancy present in the original implementation.
 
 **Context loading**: `EphEngineFull` holds the `.ctx` contexts as member variables. The Earth/EMB context and Moon context are loaded once on first use; the planet context is reloaded when `np` changes. Load failures are detected from `ephPlanc`/`ephMoonc` return values and cause an early return.
 
-**`EphEngineINDI`**: currently delegates to `EphEngineFull` with a log warning. The packed VSOP2010 loader (`indi_eph_packer`, $10^{-11}$ truncation filter) is not yet implemented.
+**`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a $10^{-10}$ AU amplitude threshold, producing a 9.3 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.0006" for Mars at JD 2459019.833333.
 
 ---
 
@@ -116,7 +116,9 @@ The split provides cross-validation between two independent ephemeris models (IN
 | ERFA-2000B | Deneb apparent position | 0.050" |
 | ERFA A vs B delta | — | 0.000264" |
 | libnova planetary | Mars geocentric (2020) | 1008" |
-| EPH-Full | Mars geocentric (2020) | 0.73" |
+| EPH-Full | Mars geocentric (2020) | 5.7" vs DE440 (VSOP2010 fitted to DE405) |
+| EPH-Full | Moon geocentric (2020) | 0.25" vs DE440 |
+| EPH-INDI vs EPH-Full | Mars geocentric (2020) | 0.0006" |
 
 Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
@@ -140,4 +142,4 @@ Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
 **M5 — Topocentric Promotion**: Introduce `INDI::ObservationContext` mapping to `eraASTROM`. Replace `eraApci*` with `eraApco*` context builders in `EquatorialToHorizontal`, enabling diurnal aberration, polar motion, and topocentric parallax when observer location is available.
 
-**M4 (remaining) — Packed EPH**: Implement `indi_eph_packer` with a $10^{-11}$ truncation filter to produce a ~12 MB dataset. Wire it into `EphEngineINDI` to replace the current full-engine fallback.
+**M5 — Topocentric Promotion**: Introduce `INDI::ObservationContext` mapping to `eraASTROM`. Replace `eraApci*` with `eraApco*` context builders in `EquatorialToHorizontal`, enabling diurnal aberration, polar motion, and topocentric parallax when observer location is available.

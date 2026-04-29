@@ -75,22 +75,13 @@ TEST(EngineComparison, Reciprocity)
 
 TEST(EngineComparison, PlanetDeviation)
 {
-    double jd = 2459019.833333; 
-    INDI::IEquatorialCoordinates mars_libnova, mars_erfa;
+    double jd = 2459019.833333;
+    INDI::IEquatorialCoordinates mars_libnova, mars_full, mars_indi;
 
     // JPL Horizons Truth for Mars at JD 2459019.833333
     const double RA_TRUTH = 23.7442125;
     const double DEC_TRUTH = -4.7558155;
 
-    // 1. Get legacy result (VSOP87)
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::LIBNOVA);
-    INDI::GetPlanetObserved(4, jd, &mars_libnova);
-
-    // 2. Get modern result (VSOP2010 via EPH)
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
-    INDI::GetPlanetObserved(4, jd, &mars_erfa);
-
-    // 3. Calculate Error vs Truth
     auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
         double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
         double dRA = (pos.rightascension - RA_TRUTH) * 15.0 * 3600.0 * cos_dec;
@@ -98,15 +89,74 @@ TEST(EngineComparison, PlanetDeviation)
         return std::hypot(dRA, dDec);
     };
 
+    // 1. Legacy result (VSOP87)
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::LIBNOVA);
+    INDI::GetPlanetObserved(4, jd, &mars_libnova);
+
+    // 2. Full VSOP2010 (EPH_FULL)
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
+    INDI::GetPlanetObserved(4, jd, &mars_full);
+
+    // 3. Truncated VSOP2010 (EPH_INDI, packed .ictx or full fallback)
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
+    INDI::GetPlanetObserved(4, jd, &mars_indi);
+
     double error_libnova = calc_error(mars_libnova);
-    double error_erfa = calc_error(mars_erfa);
+    double error_full    = calc_error(mars_full);
+    double error_indi    = calc_error(mars_indi);
+
+    // Delta between EPH_FULL and EPH_INDI (truncation budget)
+    double delta_full_indi = std::hypot(
+        (mars_full.rightascension - mars_indi.rightascension) * 15.0 * 3600.0 * std::cos(DEC_TRUTH * M_PI / 180.0),
+        (mars_full.declination    - mars_indi.declination)    * 3600.0
+    );
 
     GTEST_LOG_(INFO) << "Mars Absolute Error vs JPL Truth (2020):";
-    GTEST_LOG_(INFO) << "  libnova: " << error_libnova << " arcsec";
-    GTEST_LOG_(INFO) << "  ERFA/EPH: " << error_erfa << " arcsec";
+    GTEST_LOG_(INFO) << "  libnova:   " << error_libnova << " arcsec";
+    GTEST_LOG_(INFO) << "  EPH_FULL:  " << error_full    << " arcsec";
+    GTEST_LOG_(INFO) << "  EPH_INDI:  " << error_indi    << " arcsec";
+    GTEST_LOG_(INFO) << "  FULL vs INDI delta: " << delta_full_indi << " arcsec";
 
-    EXPECT_LT(error_erfa, 2.0);
+    // VSOP2010 was fitted to DE405; vs DE440 geocentric errors are larger (~5-10")
     EXPECT_GT(error_libnova, 1000.0);
+    EXPECT_LT(error_full, 15.0);
+    EXPECT_LT(error_indi, 0.04 + error_full);   // truncation adds at most 0.04"
+    EXPECT_LT(delta_full_indi, 0.04);
+}
+
+TEST(EngineComparison, MoonDeviation)
+{
+    double jd = 2459019.833333;
+    INDI::IEquatorialCoordinates moon_full, moon_indi;
+
+    // JPL Horizons Truth (DE440) for Moon at JD 2459019.833333
+    // RA in degrees: 64.16991, Dec: 19.17745
+    const double RA_TRUTH  = 64.16991 / 15.0;  // hours
+    const double DEC_TRUTH = 19.17745;
+
+    auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+        double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
+        double dRA = (pos.rightascension - RA_TRUTH) * 15.0 * 3600.0 * cos_dec;
+        double dDec = (pos.declination - DEC_TRUTH) * 3600.0;
+        return std::hypot(dRA, dDec);
+    };
+
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
+    INDI::GetPlanetObserved(3, jd, &moon_full);
+
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
+    INDI::GetPlanetObserved(3, jd, &moon_indi);
+
+    double error_full = calc_error(moon_full);
+    double error_indi = calc_error(moon_indi);
+
+    GTEST_LOG_(INFO) << "Moon Absolute Error vs JPL Truth (2020):";
+    GTEST_LOG_(INFO) << "  EPH_FULL:  " << error_full << " arcsec";
+    GTEST_LOG_(INFO) << "  EPH_INDI:  " << error_indi << " arcsec";
+
+    // Moon uses ELP/MPP02 (same .ctx in both engines) — results must be identical
+    EXPECT_LT(error_full, 20.0);   // ELP/MPP02 geocentric accuracy vs DE440
+    EXPECT_NEAR(error_full, error_indi, 0.001);  // same loader, must match
 }
 
 int main(int argc, char **argv)

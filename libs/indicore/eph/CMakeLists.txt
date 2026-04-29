@@ -5,6 +5,7 @@ set(eph_SOURCES
     mooni.c
     moonc.c
     planc.c
+    planc_indi.c
     planet.c
     plani.c
     rdplan.c

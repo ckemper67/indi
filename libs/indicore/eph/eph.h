@@ -70,7 +70,8 @@ int ephEarth ( double, ephMOONctx*, ephPLANctx*, double[2][3] );
 int ephMoon ( ephMOONctx*, double, double[2][3] );
 int ephMoonc ( char*, int, ephMOONctx* );
 int ephMooni ( char*, int, ephMOONctx* );
-int ephPlanc ( int, char*, ephPLANctx* );
+int ephPlanc  ( int, char*, ephPLANctx* );
+int ephPlanci ( int, char*, ephPLANctx* );
 int ephPlanet ( int, ephPLANctx*, double, double[2][3] );
 int ephPlani ( char*, int, ephPLANctx* );
 int ephRdplan ( ephMOONctx*, ephPLANctx*, ephPLANctx*,
