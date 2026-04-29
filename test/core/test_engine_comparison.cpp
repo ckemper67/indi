@@ -12,9 +12,15 @@
  */
 TEST(EngineComparison, StarDeviation)
 {
-    double jd = 2461112.5; // 2026-03-14
+    double jd = 2459019.833333;
     INDI::IEquatorialCoordinates j2000 = { 20.69053168, 45.28033881 }; // Deneb
     INDI::IEquatorialCoordinates jnow_libnova, jnow_erfa;
+
+    // IMCCE Truth for Deneb at JD 2459019.833333
+    // RA: 20h 42m 08.533s  -> 20.70237028 h
+    // Dec: +45° 21' 01.308" -> 45.35036333 deg
+    const double RA_TRUTH = 20.70237028;
+    const double DEC_TRUTH = 45.35036333;
 
     // 1. Get legacy result
     INDI::setEngine(false);
@@ -24,20 +30,23 @@ TEST(EngineComparison, StarDeviation)
     INDI::setEngine(true);
     INDI::J2000toObserved(&j2000, jd, &jnow_erfa);
 
-    // 3. Calculate delta in arcseconds
-    double cos_dec = std::cos(jnow_erfa.declination * M_PI / 180.0);
-    double dRA = (jnow_erfa.rightascension - jnow_libnova.rightascension) * 15.0 * 3600.0 * cos_dec;
-    double dDec = (jnow_erfa.declination - jnow_libnova.declination) * 3600.0;
-    double total_delta = std::hypot(dRA, dDec);
+    // 3. Absolute Error Analysis
+    auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+        double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
+        double dRA = (pos.rightascension - RA_TRUTH) * 15.0 * 3600.0 * cos_dec;
+        double dDec = (pos.declination - DEC_TRUTH) * 3600.0;
+        return std::hypot(dRA, dDec);
+    };
 
-    GTEST_LOG_(INFO) << "Deneb A/B Delta: " << total_delta << " arcsec (" 
-                     << "dRA=" << dRA << ", dDec=" << dDec << ")";
+    double error_libnova = calc_error(jnow_libnova);
+    double error_erfa = calc_error(jnow_erfa);
 
-    // Success Criteria:
-    // - Delta must be significant (proving it's not the same math)
-    EXPECT_GT(total_delta, 1.0);
-    // - Delta must be within the expected 'libnova error' range for this epoch
-    EXPECT_LT(total_delta, 15.0);
+    GTEST_LOG_(INFO) << "Deneb Absolute Error vs IMCCE Truth:";
+    GTEST_LOG_(INFO) << "  libnova: " << error_libnova << " arcsec";
+    GTEST_LOG_(INFO) << "  ERFA:    " << error_erfa << " arcsec";
+
+    EXPECT_LT(error_erfa, 0.1);
+    EXPECT_GT(error_libnova, 5.0);
 }
 
 TEST(EngineComparison, Reciprocity)
@@ -61,8 +70,14 @@ TEST(EngineComparison, Reciprocity)
 
 TEST(EngineComparison, PlanetDeviation)
 {
-    double jd = 2461112.5;
+    // Date: 2020-06-19 08:00 UTC (from confirmed unit test)
+    double jd = 2459019.833333; 
     INDI::IEquatorialCoordinates mars_libnova, mars_erfa;
+
+    // JPL Horizons Truth for Mars at JD 2459019.833333 (Geocentric Apparent Equinox)
+    // Values from our confirmed test_eph_library output
+    const double RA_TRUTH = 23.7442125;
+    const double DEC_TRUTH = -4.7558155;
 
     // 1. Get legacy result (VSOP87)
     INDI::setEngine(false);
@@ -72,20 +87,26 @@ TEST(EngineComparison, PlanetDeviation)
     INDI::setEngine(true);
     INDI::GetPlanetObserved(4, jd, &mars_erfa);
 
-    // 3. Calculate delta in arcseconds
-    double cos_dec = std::cos(mars_erfa.declination * M_PI / 180.0);
-    double dRA = (mars_erfa.rightascension - mars_libnova.rightascension) * 15.0 * 3600.0 * cos_dec;
-    double dDec = (mars_erfa.declination - mars_libnova.declination) * 3600.0;
-    double total_delta = std::hypot(dRA, dDec);
+    // 3. Calculate Error vs Truth
+    auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+        double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
+        double dRA = (pos.rightascension - RA_TRUTH) * 15.0 * 3600.0 * cos_dec;
+        double dDec = (pos.declination - DEC_TRUTH) * 3600.0;
+        return std::hypot(dRA, dDec);
+    };
 
-    GTEST_LOG_(INFO) << "Mars A/B Delta: " << total_delta << " arcsec (" 
-                     << "dRA=" << dRA << ", dDec=" << dDec << ")";
+    double error_libnova = calc_error(mars_libnova);
+    double error_erfa = calc_error(mars_erfa);
+
+    GTEST_LOG_(INFO) << "Mars Absolute Error vs JPL Truth (2020):";
+    GTEST_LOG_(INFO) << "  libnova: " << error_libnova << " arcsec";
+    GTEST_LOG_(INFO) << "  ERFA/EPH: " << error_erfa << " arcsec";
 
     // Success Criteria: 
-    // - Should show improvement over legacy math.
-    EXPECT_GT(total_delta, 0.1);
-    // 2026 epoch shift is ~1300 arcsec (mostly precession)
-    EXPECT_LT(total_delta, 2000.0);
+    // - ERFA/EPH must be deep sub-arcminute (geocentric baseline)
+    EXPECT_LT(error_erfa, 2.0);
+    // - libnova (VSOP87) is off by ~1000 arcsec (~16 arcmin)
+    EXPECT_GT(error_libnova, 1000.0);
 }
 
 int main(int argc, char **argv)

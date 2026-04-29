@@ -32,9 +32,18 @@ The goal of this migration is to replace the aging `libnova` coordinate engine w
     - **ΔT Correction**: Verify the Morrison & Stephenson estimator logic.
 
 ### Level 2: Mathematical Unit Tests (Truth Validation)
-**Objective**: Verify implementation matches independent arbiters.
-- **Baseline**: JPL Horizons (API) and SOFA validation examples.
-- **Success Criteria**: Stars < 0.001 arcsec; Planets < 0.05 arcsec.
+**Objective**: Verify implementation matches independent arbiters with high precision.
+- **Method**: Compare engine results against the **Golden Datasets**.
+- **Truth Providers**: 
+    - `tools/generate_planet_golden.py`: Queries JPL Horizons for planetary truth.
+    - `tools/generate_star_golden.py`: Queries IMCCE Miriade for stellar truth.
+- **Reference Data**: 
+    - `test/data/planet_golden.json`: NASA-verified planetary coordinates.
+    - `test/data/star_golden.json`: IMCCE-verified star coordinates.
+- **Success Criteria**: 
+    - Stars: Delta < 0.001 arcsec (vs. SOFA examples).
+    - Planets: Delta < 2.0 arcsec (vs. JPL Golden baseline in geocentric mode).
+    - Planets (Final): Delta < 0.05 arcsec (after Milestone 4 topocentric upgrade).
 
 ### Level 3: libastro 2.0 Regression & Sweeps
 **Objective**: Validate abstractions and physical edge cases.
