@@ -80,6 +80,7 @@ if(NOVA_FOUND)
         libastro.cpp
         LibnovaEngine.cpp
         ErfaEngine.cpp
+        EphEngine.cpp
     )
 
     add_subdirectory(eph)

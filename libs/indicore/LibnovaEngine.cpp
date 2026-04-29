@@ -1,11 +1,6 @@
 #include "CoordinateEngine.h"
+#include "indidevapi.h"
 #include "indicom.h"
-#include <libnova/julian_day.h>
-#include <libnova/transform.h>
-#include <libnova/precession.h>
-#include <libnova/nutation.h>
-#include <libnova/aberration.h>
-#include <math.h>
 #include <libnova/mercury.h>
 #include <libnova/venus.h>
 #include <libnova/mars.h>
@@ -15,6 +10,11 @@
 #include <libnova/neptune.h>
 #include <libnova/solar.h>
 #include <libnova/lunar.h>
+#include <libnova/transform.h>
+#include <libnova/precession.h>
+#include <libnova/nutation.h>
+#include <libnova/aberration.h>
+#include <cmath>
 #include <memory>
 
 /**
@@ -47,7 +47,7 @@ static void local_ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse)
     posn->dec += delta_dec;
 }
 
-class LibnovaEngine : public ICoordinateEngine {
+class LibnovaStellarEngine : public ICoordinateEngine {
 public:
     void J2000toObserved(INDI::IEquatorialCoordinates *j2000, double jd, INDI::IEquatorialCoordinates *jnow) override {
         ln_equ_posn tempPosn;
@@ -88,7 +88,10 @@ public:
         position->azimuth = range360(180 + horizontalPos.az);
         position->altitude = horizontalPos.alt;
     }
+};
 
+class LibnovaPlanetaryEngine : public IPlanetaryEngine {
+public:
     void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) override {
         struct ln_equ_posn equatorialPos;
         switch(np) {
@@ -107,6 +110,10 @@ public:
     }
 };
 
-std::unique_ptr<ICoordinateEngine> createLibnovaEngine() {
-    return std::make_unique<LibnovaEngine>();
+std::unique_ptr<ICoordinateEngine> createLibnovaStellarEngine() {
+    return std::make_unique<LibnovaStellarEngine>();
+}
+
+std::unique_ptr<IPlanetaryEngine> createLibnovaPlanetaryEngine() {
+    return std::make_unique<LibnovaPlanetaryEngine>();
 }

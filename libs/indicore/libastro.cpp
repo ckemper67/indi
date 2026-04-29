@@ -1,27 +1,3 @@
-/*
-    libastro
-
-    functions used for coordinate conversions, based on libnova
-
-    Copyright (C) 2020 Chris Rowland
-    Copyright (C) 2021 Jasem Mutlaq
-
-    This library is free software; you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published
-    by the Free Software Foundation; either version 2.1 of the License, or
-    (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful, but
-    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-    or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
-    License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with this library; if not, write to the Free Software Foundation,
-    Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
-
-*/
-
 #include "libastro.h"
 #include "indicom.h"
 #include "CoordinateEngine.h"
@@ -32,51 +8,69 @@
 namespace INDI
 {
 
-static bool useErfa = false;
+static StellarEngine currentStellarType = StellarEngine::LIBNOVA;
+static PlanetaryEngine currentPlanetaryType = PlanetaryEngine::LIBNOVA;
 
-void setEngine(bool erfa) {
-    useErfa = erfa;
+static std::unique_ptr<ICoordinateEngine> stellarEngine = nullptr;
+static std::unique_ptr<IPlanetaryEngine> planetaryEngine = nullptr;
+
+void setStellarEngine(StellarEngine engine) {
+    currentStellarType = engine;
+    stellarEngine.reset(); // Force re-init
 }
 
-ICoordinateEngine& getEngine() {
-    static std::unique_ptr<ICoordinateEngine> engine = nullptr;
-    static bool lastUseErfa = false;
+void setPlanetaryEngine(PlanetaryEngine engine) {
+    currentPlanetaryType = engine;
+    planetaryEngine.reset(); // Force re-init
+}
 
-    if (!engine || useErfa != lastUseErfa) {
-        lastUseErfa = useErfa;
-        if (useErfa)
-            engine = createErfaEngine();
-        else
-            engine = createLibnovaEngine();
+ICoordinateEngine& getStellarEngine() {
+    if (!stellarEngine) {
+        switch(currentStellarType) {
+            case StellarEngine::ERFA_2000A: stellarEngine = createErfaEngine2000A(); break;
+            case StellarEngine::ERFA_2000B: stellarEngine = createErfaEngine2000B(); break;
+            default:                        stellarEngine = createLibnovaStellarEngine(); break;
+        }
     }
-    return *engine;
+    return *stellarEngine;
+}
+
+IPlanetaryEngine& getPlanetaryEngine() {
+    if (!planetaryEngine) {
+        switch(currentPlanetaryType) {
+            case PlanetaryEngine::EPH_FULL: planetaryEngine = createEphEngineFull(); break;
+            case PlanetaryEngine::EPH_INDI: planetaryEngine = createEphEngineINDI(); break;
+            default:                        planetaryEngine = createLibnovaPlanetaryEngine(); break;
+        }
+    }
+    return *planetaryEngine;
 }
 
 void ObservedToJ2000(IEquatorialCoordinates * observed, double jd, IEquatorialCoordinates * J2000pos)
 {
-    getEngine().ObservedToJ2000(observed, jd, J2000pos);
+    getStellarEngine().ObservedToJ2000(observed, jd, J2000pos);
 }
 
 void J2000toObserved(IEquatorialCoordinates *J2000pos, double jd, IEquatorialCoordinates *observed)
 {
-    getEngine().J2000toObserved(J2000pos, jd, observed);
+    getStellarEngine().J2000toObserved(J2000pos, jd, observed);
 }
 
 void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IHorizontalCoordinates *position)
 {
-    getEngine().EquatorialToHorizontal(object, observer, JD, position);
+    getStellarEngine().EquatorialToHorizontal(object, observer, JD, position);
 }
 
 void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed)
 {
-    getEngine().GetPlanetObserved(np, jd, observed);
+    getPlanetaryEngine().GetPlanetObserved(np, jd, observed);
 }
 
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position)
 {
-    // FIXME: Implement this for ERFA/EPH engine as well
+    // Legacy fallback: This will be moved to the engine interface in Milestone 5
     ln_lnlat_posn libnova_location = {observer->longitude > 180 ? observer->longitude - 360 : observer->longitude, observer->latitude};
     ln_hrz_posn libnova_object = {range360(object->azimuth + 180), object->altitude};
     ln_equ_posn equatorialPos;

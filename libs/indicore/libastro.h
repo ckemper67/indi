@@ -133,8 +133,20 @@ void ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse = false);
 
 /**
  * @brief Select the coordinate engine to use (legacy Libnova or modern ERFA).
- * @param erfa True to use ERFA, false for Libnova.
  */
-void setEngine(bool erfa);
+enum class StellarEngine {
+    LIBNOVA,
+    ERFA_2000A,  // Full IAU 2000A (1,365 terms)
+    ERFA_2000B   // Lite IAU 2000B (77 terms) - Default high-precision
+};
+
+enum class PlanetaryEngine {
+    LIBNOVA,     // VSOP87
+    EPH_FULL,    // VSOP2010 Full (140MB)
+    EPH_INDI     // VSOP2010 Truncated (~12MB)
+};
+
+void setStellarEngine(StellarEngine engine);
+void setPlanetaryEngine(PlanetaryEngine engine);
 
 }
