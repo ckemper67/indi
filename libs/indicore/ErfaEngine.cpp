@@ -28,6 +28,25 @@ static void eraAtci00b(double rc, double dc, double pr, double pd, double px, do
     eraAtciq(rc, dc, pr, pd, px, rv, &astrom, ri, di);
 }
 
+static void eraApco00b(double utc1, double utc2, double dut1,
+                       double elong, double phi, double hm,
+                       double xp, double yp, double phpa, double tc, double rh, double wl,
+                       eraASTROM *astrom, double *eo)
+{
+    // Geocentric part: 77-term nutation (2000B) via eraPnm00b + eraS00, same as eraApci00b.
+    // Observer part: eraApio13 is nutation-model-independent — it only uses ERA, polar motion,
+    // and the TIO locator s' (eraSp00), none of which depend on the 2000A/B choice.
+    // eraApco13 is "2000A" only because it calls eraPnm06a before eraApio13; eraApio13 itself is neutral.
+    double ehpv[2][3], ebpv[2][3], r[3][3], x, y, s;
+    eraEpv00(utc1, utc2, ehpv, ebpv);
+    eraPnm00b(utc1, utc2, r);
+    eraBpn2xy(r, &x, &y);
+    s = eraS00(utc1, utc2, x, y);
+    eraApci(utc1, utc2, ebpv, ehpv[0], x, y, s, astrom);
+    eraApio13(utc1, utc2, dut1, elong, phi, hm, xp, yp, phpa, tc, rh, wl, astrom);
+    *eo = eraEors(r, s);
+}
+
 #endif
 
 class ErfaEngine2000A : public ICoordinateEngine {
@@ -66,17 +85,16 @@ public:
     void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IHorizontalCoordinates *position) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
-        INDI_UNUSED(observer); // geocentric only until M5 introduces ObservationContext
         eraASTROM astrom;
         double eo;
-        eraApci13(utc1, utc2, &astrom, &eo);
-        double ra_rad = HOURS_TO_RAD(object->rightascension);
-        double dec_rad = DEG_TO_RAD(object->declination);
-        double ra_cirs = eraAnp(ra_rad + eo);
+        eraApco13(utc1, utc2, 0.0,
+                  DEG_TO_RAD(observer->longitude), DEG_TO_RAD(observer->latitude), observer->elevation,
+                  0.0, 0.0, 0.0, 0.0, 0.0, 0.55, &astrom, &eo);
+        double ra_cirs = eraAnp(HOURS_TO_RAD(object->rightascension) + eo);
         double aob, zob, hob, dob, rob;
-        eraAtioq(ra_cirs, dec_rad, &astrom, &aob, &zob, &hob, &dob, &rob);
-        position->azimuth = RAD_TO_DEG(aob);
-        position->altitude = RAD_TO_DEG(rob);
+        eraAtioq(ra_cirs, DEG_TO_RAD(object->declination), &astrom, &aob, &zob, &hob, &dob, &rob);
+        position->azimuth  = RAD_TO_DEG(aob);
+        position->altitude = 90.0 - RAD_TO_DEG(zob);
 #else
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
 #endif
@@ -118,18 +136,17 @@ public:
 
     void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IHorizontalCoordinates *position) override {
 #ifdef HAVE_ERFA
-        INDI_UNUSED(observer); // geocentric only until M5 introduces ObservationContext
         double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
         eraASTROM astrom;
         double eo;
-        eraApci00b(utc1, utc2, &astrom, &eo);
-        double ra_rad = HOURS_TO_RAD(object->rightascension);
-        double dec_rad = DEG_TO_RAD(object->declination);
-        double ra_cirs = eraAnp(ra_rad + eo);
+        eraApco00b(utc1, utc2, 0.0,
+                   DEG_TO_RAD(observer->longitude), DEG_TO_RAD(observer->latitude), observer->elevation,
+                   0.0, 0.0, 0.0, 0.0, 0.0, 0.55, &astrom, &eo);
+        double ra_cirs = eraAnp(HOURS_TO_RAD(object->rightascension) + eo);
         double aob, zob, hob, dob, rob;
-        eraAtioq(ra_cirs, dec_rad, &astrom, &aob, &zob, &hob, &dob, &rob);
-        position->azimuth = RAD_TO_DEG(aob);
-        position->altitude = RAD_TO_DEG(rob);
+        eraAtioq(ra_cirs, DEG_TO_RAD(object->declination), &astrom, &aob, &zob, &hob, &dob, &rob);
+        position->azimuth  = RAD_TO_DEG(aob);
+        position->altitude = 90.0 - RAD_TO_DEG(zob);
 #else
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
 #endif

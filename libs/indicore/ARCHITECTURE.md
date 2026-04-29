@@ -56,9 +56,23 @@ Planet codes: 1=Mercury, 2=Venus, 3=Moon, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus,
 
 All other steps (`eraBpn2xy`, `eraApci`, `eraEors`) are identical. This gives the `ObservedToJ2000` / `J2000toObserved` pair a single consistent ASTROM context with a correctly computed equation of origins.
 
+`eraApco00b` extends `eraApci00b` with observer-local setup by calling `eraApio13` after the geocentric step. `eraApio13` is nutation-model-independent — it only computes ERA, polar motion, and the TIO locator s' (`eraSp00`), none of which depend on the 2000A/B choice. This keeps `EquatorialToHorizontal` on a pure 2000B code path.
+
+**2000B model purity audit** — the following 2000A identifiers must not appear anywhere in the 2000B code path:
+
+| Identifier | Role | Present in 2000B? |
+|---|---|---|
+| `eraPnm06a` / `eraNut06a` | 1365-term nutation matrix | No |
+| `eraS06` | CIO locator for IAU 2006 | No |
+| `eraApci13` | geocentric ASTROM (2000A) | No |
+| `eraApco13` | observer ASTROM (2000A) | No |
+| `eraAtci13` | ICRS→CIRS (2000A) | No |
+
+All leaf functions called by the 2000B path (`eraEpv00`, `eraBpn2xy`, `eraApci`, `eraEors`, `eraAtciq`, `eraAticq`, `eraApio13`, `eraAtioq`) are model-agnostic — they operate on pre-computed BPN matrices or pre-built ASTROM contexts.
+
 **Time input**: JD is treated as UTC and split into a two-part Julian Date per ERFA convention (`utc1 = floor(jd) + 0.5`, `utc2 = jd - utc1`).
 
-**`EquatorialToHorizontal`**: currently geocentric — the `observer` parameter is accepted but unused. Uses `eraApci*` + `eraAtioq`, which gives a correct CIRS→horizontal transform but without diurnal aberration, polar motion, or topocentric parallax. Full topocentric support is planned for M5.
+**`EquatorialToHorizontal`**: uses `eraApco00b` + `eraAtioq`. The observer's longitude and latitude are used to compute local sidereal time and hour angle; no topocentric parallax is applied (geocentric CIRS input). Full topocentric support is planned for M5.
 
 ### Planetary Engines (`libs/indicore/EphEngine.cpp`, `LibnovaEngine.cpp`)
 
