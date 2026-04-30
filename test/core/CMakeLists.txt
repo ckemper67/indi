@@ -28,19 +28,22 @@ TARGET_LINK_LIBRARIES(test_property_class
 )
 ADD_TEST(test_property_class test_property_class)
 
-SET (test_libastro_regression_SRCS
-    test_libastro_regression.cpp
+SET (test_horizontal_truth_SRCS
+    test_horizontal_truth.cpp
 )
-ADD_EXECUTABLE(test_libastro_regression
-    ${test_libastro_regression_SRCS}
+ADD_EXECUTABLE(test_horizontal_truth
+    ${test_horizontal_truth_SRCS}
 )
-TARGET_LINK_LIBRARIES(test_libastro_regression
+TARGET_LINK_LIBRARIES(test_horizontal_truth
     indidriver
     ${GTEST_BOTH_LIBRARIES}
     ${GMOCK_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
-ADD_TEST(test_libastro_regression test_libastro_regression)
+TARGET_COMPILE_DEFINITIONS(test_horizontal_truth PRIVATE
+    TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test/data"
+)
+ADD_TEST(test_horizontal_truth test_horizontal_truth)
 
 SET (test_engine_comparison_SRCS
     test_engine_comparison.cpp
