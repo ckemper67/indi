@@ -99,6 +99,23 @@ public:
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
 #endif
     }
+
+    void HorizontalToEquatorial(INDI::IHorizontalCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IEquatorialCoordinates *position) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
+        eraASTROM astrom;
+        double eo;
+        eraApco13(utc1, utc2, 0.0,
+                  DEG_TO_RAD(observer->longitude), DEG_TO_RAD(observer->latitude), observer->elevation,
+                  0.0, 0.0, 0.0, 0.0, 0.0, 0.55, &astrom, &eo);
+        double ri, di;
+        eraAtoiq("A", DEG_TO_RAD(object->azimuth), DEG_TO_RAD(90.0 - object->altitude), &astrom, &ri, &di);
+        position->rightascension = RAD_TO_HOURS(eraAnp(ri - eo));
+        position->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
+#endif
+    }
 };
 
 class ErfaEngine2000B : public ICoordinateEngine {
@@ -147,6 +164,23 @@ public:
         eraAtioq(ra_cirs, DEG_TO_RAD(object->declination), &astrom, &aob, &zob, &hob, &dob, &rob);
         position->azimuth  = RAD_TO_DEG(aob);
         position->altitude = 90.0 - RAD_TO_DEG(zob);
+#else
+        INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
+#endif
+    }
+
+    void HorizontalToEquatorial(INDI::IHorizontalCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IEquatorialCoordinates *position) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(JD) + 0.5, utc2 = JD - utc1;
+        eraASTROM astrom;
+        double eo;
+        eraApco00b(utc1, utc2, 0.0,
+                   DEG_TO_RAD(observer->longitude), DEG_TO_RAD(observer->latitude), observer->elevation,
+                   0.0, 0.0, 0.0, 0.0, 0.0, 0.55, &astrom, &eo);
+        double ri, di;
+        eraAtoiq("A", DEG_TO_RAD(object->azimuth), DEG_TO_RAD(90.0 - object->altitude), &astrom, &ri, &di);
+        position->rightascension = RAD_TO_HOURS(eraAnp(ri - eo));
+        position->declination    = RAD_TO_DEG(di);
 #else
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
 #endif

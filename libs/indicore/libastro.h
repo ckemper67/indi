@@ -33,8 +33,8 @@
 namespace INDI
 {
 
-#define RAD_TO_DEG(rad) (rad * 180.0/M_PI)
-#define DEG_TO_RAD(deg) (deg * M_PI/180.0)
+#define RAD_TO_DEG(rad) ((rad) * 180.0/M_PI)
+#define DEG_TO_RAD(deg) ((deg) * M_PI/180.0)
 
 /**
  * \defgroup Position Structures
@@ -95,11 +95,11 @@ void J2000toObserved(IEquatorialCoordinates *J2000pos, double jd, IEquatorialCoo
 
 /**
  * @brief EquatorialToHorizontal Calculate horizontal coordinates from equatorial coordinates.
- * @param object Equatorial Object Coordinates in INDI standaard (RA Hours, DE degrees).
- * @param observer Observer Location in INDI Standard (Longitude 0 to 360 Increasing Eastward)
- * @param JD Julian Date
- * @param position Calculated Horizontal Coordinates.
- * @note Use this instead of libnova ln_get_hrz_from_equ since it corrects libnova Azimuth (0 = North and not South).
+ * @param object JNow/CIRS apparent coordinates (RA hours, Dec degrees) — output of J2000toObserved.
+ *               Do NOT pass J2000 catalogue coordinates directly.
+ * @param observer Observer location (longitude 0–360 eastward, latitude, elevation in meters).
+ * @param JD Julian Date (UTC).
+ * @param position Calculated horizontal coordinates (azimuth 0=N/90=E, altitude degrees).
  */
 void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IHorizontalCoordinates *position);
@@ -113,12 +113,12 @@ void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinat
 void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed);
 
 /**
- * @brief HorizontalToEquatorial Calculate Equatorial EOD Coordinates from horizontal coordinates
- * @param object Horizontal Object Coordinates
- * @param observer Observer Location in INDI Standard (Longitude 0 to 360 Increasing Eastward)
- * @param JD Julian Date
- * @param position Calculated Equatorial Coordinates in INDI standards (RA hours, DE degrees).
- * @note Use this instead of libnova ln_get_equ_from_hrz since it corrects libnova Azimuth (0 = North and not South).
+ * @brief HorizontalToEquatorial Calculate JNow/CIRS apparent equatorial coordinates from horizontal coordinates.
+ * @param object Horizontal coordinates (azimuth 0=N/90=E, altitude degrees).
+ * @param observer Observer location (longitude 0–360 eastward, latitude, elevation in meters).
+ * @param JD Julian Date (UTC).
+ * @param position Calculated JNow/CIRS apparent coordinates (RA hours, Dec degrees).
+ *                 Pass through ObservedToJ2000 to obtain J2000 catalogue coordinates.
  */
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position);

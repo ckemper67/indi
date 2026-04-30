@@ -88,6 +88,15 @@ public:
         position->azimuth = range360(180 + horizontalPos.az);
         position->altitude = horizontalPos.alt;
     }
+
+    void HorizontalToEquatorial(INDI::IHorizontalCoordinates *object, INDI::IGeographicCoordinates *observer, double JD, INDI::IEquatorialCoordinates *position) override {
+        ln_lnlat_posn libnova_location = {observer->longitude > 180 ? observer->longitude - 360 : observer->longitude, observer->latitude};
+        ln_hrz_posn libnova_object = {range360(object->azimuth + 180), object->altitude};
+        ln_equ_posn equatorialPos;
+        get_equ_from_hrz(&libnova_object, &libnova_location, JD, &equatorialPos);
+        position->rightascension = equatorialPos.ra / 15.0;
+        position->declination = equatorialPos.dec;
+    }
 };
 
 class LibnovaPlanetaryEngine : public IPlanetaryEngine {

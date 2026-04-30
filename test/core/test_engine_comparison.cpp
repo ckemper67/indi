@@ -55,10 +55,12 @@ TEST(EngineComparison, StarDeviation)
     GTEST_LOG_(INFO) << "  A vs B:   " << delta_ab << " arcsec";
 
     // Success Criteria:
-    EXPECT_GT(err_ln, 15.0);
+    // libnova < 1": nutation fix in local_ln_get_equ_nut (DEG_TO_RAD arg parenthesization)
+    // made libnova accurate; a large libnova error would indicate that regression.
+    EXPECT_LT(err_ln, 1.0);
     EXPECT_LT(err_a, 0.1);
     EXPECT_LT(err_b, 0.1);
-    EXPECT_LT(delta_ab, 0.001); 
+    EXPECT_LT(delta_ab, 0.001);
 }
 
 TEST(EngineComparison, Reciprocity)

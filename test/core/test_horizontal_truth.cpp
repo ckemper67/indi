@@ -247,6 +247,50 @@ TEST(HorizontalTruth, ObserverLatitudeMatters)
                      << " deg, Siding Spring alt=" << alt_siding << " deg";
 }
 
+// ---------------------------------------------------------------------------
+// Round-trip: EquatorialToHorizontal -> HorizontalToEquatorial -> RA/Dec
+// Validates HorizontalToEquatorial symmetry with the forward transform.
+// Both use the same ASTROM context so the round-trip must close to < 1".
+// ---------------------------------------------------------------------------
+TEST(HorizontalTruth, RoundTrip_HorizontalToEquatorial)
+{
+    auto cases = load_golden();
+    ASSERT_GT(cases.size(), 0u);
+    INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
+
+    double max_ra_err = 0, max_dec_err = 0;
+    for (auto &c : cases) {
+        INDI::IEquatorialCoordinates j2000 = { c.ra_j2000_h, c.dec_j2000_deg };
+        INDI::IEquatorialCoordinates jnow_in;
+        INDI::J2000toObserved(&j2000, c.jd, &jnow_in);
+
+        INDI::IGeographicCoordinates obs = { c.lon_deg, c.lat_deg, c.elev_m };
+        INDI::IHorizontalCoordinates hrz;
+        INDI::EquatorialToHorizontal(&jnow_in, &obs, c.jd, &hrz);
+
+        // Skip objects below the horizon — eraAtoiq is less numerically stable there
+        if (hrz.altitude < 5.0) continue;
+
+        INDI::IEquatorialCoordinates jnow_out;
+        INDI::HorizontalToEquatorial(&hrz, &obs, c.jd, &jnow_out);
+
+        double cos_dec = std::cos(jnow_in.declination * M_PI / 180.0);
+        double ra_err  = std::abs(jnow_in.rightascension - jnow_out.rightascension) * 15.0 * 3600.0 * cos_dec;
+        double dec_err = std::abs(jnow_in.declination    - jnow_out.declination)    * 3600.0;
+        max_ra_err  = std::max(max_ra_err,  ra_err);
+        max_dec_err = std::max(max_dec_err, dec_err);
+
+        GTEST_LOG_(INFO) << c.object << " at " << c.site
+                         << "  jnow_in=(" << jnow_in.rightascension << "h," << jnow_in.declination << "d)"
+                         << "  hrz=(" << hrz.azimuth << "," << hrz.altitude << ")"
+                         << "  jnow_out=(" << jnow_out.rightascension << "h," << jnow_out.declination << "d)"
+                         << "  ra_err=" << ra_err << "\"  dec_err=" << dec_err << "\"";
+        EXPECT_LT(ra_err,  1.0) << "Round-trip RA error for "  << c.object << " at " << c.site << ": " << ra_err  << "\"";
+        EXPECT_LT(dec_err, 1.0) << "Round-trip Dec error for " << c.object << " at " << c.site << ": " << dec_err << "\"";
+    }
+    GTEST_LOG_(INFO) << "Round-trip max: RA=" << max_ra_err << "\" Dec=" << max_dec_err << "\"";
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

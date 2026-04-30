@@ -75,13 +75,7 @@ void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed)
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position)
 {
-    // Legacy fallback: This will be moved to the engine interface in Milestone 5
-    ln_lnlat_posn libnova_location = {observer->longitude > 180 ? observer->longitude - 360 : observer->longitude, observer->latitude};
-    ln_hrz_posn libnova_object = {range360(object->azimuth + 180), object->altitude};
-    ln_equ_posn equatorialPos;
-    get_equ_from_hrz(&libnova_object, &libnova_location, JD, &equatorialPos);
-    position->rightascension = equatorialPos.ra / 15.0;
-    position->declination = equatorialPos.dec;
+    getStellarEngine().HorizontalToEquatorial(object, observer, JD, position);
 }
 
 }

@@ -28,10 +28,15 @@ public:
                                  double jd, 
                                  INDI::IEquatorialCoordinates *j2000) = 0;
 
-    virtual void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object, 
-                                        INDI::IGeographicCoordinates *observer, 
-                                        double jd, 
+    virtual void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object,
+                                        INDI::IGeographicCoordinates *observer,
+                                        double jd,
                                         INDI::IHorizontalCoordinates *position) = 0;
+
+    virtual void HorizontalToEquatorial(INDI::IHorizontalCoordinates *object,
+                                        INDI::IGeographicCoordinates *observer,
+                                        double jd,
+                                        INDI::IEquatorialCoordinates *position) = 0;
 };
 
 // Factory functions for Stellar Engines
