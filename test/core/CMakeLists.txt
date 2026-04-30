@@ -66,3 +66,19 @@ TARGET_COMPILE_DEFINITIONS(test_libastro PRIVATE
     TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test/data"
 )
 ADD_TEST(test_libastro test_libastro)
+
+SET (test_libastro_planets_SRCS
+    test_libastro_planets.cpp
+)
+ADD_EXECUTABLE(test_libastro_planets ${test_libastro_planets_SRCS})
+TARGET_INCLUDE_DIRECTORIES(test_libastro_planets PRIVATE ${CMAKE_SOURCE_DIR}/libs)
+TARGET_LINK_LIBRARIES(test_libastro_planets
+    indidriver
+    ${GTEST_BOTH_LIBRARIES}
+    ${GMOCK_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+TARGET_COMPILE_DEFINITIONS(test_libastro_planets PRIVATE
+    TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test/data"
+)
+ADD_TEST(test_libastro_planets test_libastro_planets)

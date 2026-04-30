@@ -1,0 +1,142 @@
+[
+  {
+    "name": "Mercury",
+    "jd": 2459019.833333,
+    "ra_deg": 105.48206,
+    "dec_deg": 20.96164,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Venus",
+    "jd": 2459019.833333,
+    "ra_deg": 64.37095,
+    "dec_deg": 18.51897,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Sun",
+    "jd": 2459019.833333,
+    "ra_deg": 88.06416,
+    "dec_deg": 23.42463,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Mars",
+    "jd": 2459019.833333,
+    "ra_deg": 355.90605,
+    "dec_deg": -4.86757,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Jupiter",
+    "jd": 2459019.833333,
+    "ra_deg": 297.02952,
+    "dec_deg": -21.38174,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Saturn",
+    "jd": 2459019.833333,
+    "ra_deg": 302.74309,
+    "dec_deg": -20.22029,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Uranus",
+    "jd": 2459019.833333,
+    "ra_deg": 36.89231,
+    "dec_deg": 14.11296,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Neptune",
+    "jd": 2459019.833333,
+    "ra_deg": 351.85424,
+    "dec_deg": -4.67967,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Pluto",
+    "jd": 2459019.833333,
+    "ra_deg": 296.13446,
+    "dec_deg": -22.23760,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Moon",
+    "jd": 2459019.833333,
+    "ra_deg": 63.88258,
+    "dec_deg": 19.12932,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Mercury",
+    "jd": 2451545.0,
+    "ra_deg": 272.08522,
+    "dec_deg": -24.42038,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Venus",
+    "jd": 2451545.0,
+    "ra_deg": 239.90118,
+    "dec_deg": -18.45185,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Sun",
+    "jd": 2451545.0,
+    "ra_deg": 281.28898,
+    "dec_deg": -23.03325,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Mars",
+    "jd": 2451545.0,
+    "ra_deg": 330.52460,
+    "dec_deg": -13.18050,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Jupiter",
+    "jd": 2451545.0,
+    "ra_deg": 23.86983,
+    "dec_deg": 8.59590,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Saturn",
+    "jd": 2451545.0,
+    "ra_deg": 38.76600,
+    "dec_deg": 12.61628,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Uranus",
+    "jd": 2451545.0,
+    "ra_deg": 317.48381,
+    "dec_deg": -17.01884,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Neptune",
+    "jd": 2451545.0,
+    "ra_deg": 305.44265,
+    "dec_deg": -19.21243,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Pluto",
+    "jd": 2451545.0,
+    "ra_deg": 251.42812,
+    "dec_deg": -11.39642,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  },
+  {
+    "name": "Moon",
+    "jd": 2451545.0,
+    "ra_deg": 222.45893,
+    "dec_deg": -10.90338,
+    "source": "JPL Horizons DE440 astrometric J2000"
+  }
+]

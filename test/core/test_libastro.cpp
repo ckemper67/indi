@@ -108,7 +108,7 @@ TEST(Libastro, Reciprocity)
 // ---------------------------------------------------------------------------
 TEST(Libastro, HorizontalAccuracy_vs_IMCCE)
 {
-    static constexpr double TOLERANCE_ARCSEC = 60.0;
+    static constexpr double TOLERANCE_ARCSEC = 30.0;
 
     auto cases = load_golden();
     ASSERT_GT(cases.size(), 0u) << "Could not load horizontal_golden.json";
