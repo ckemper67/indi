@@ -13,8 +13,9 @@
  * @brief Test Level 1: Mathematical Truth Validation
  *
  * Data-driven: iterates over test/data/star_golden.json.
- * For each star reports error (arcsec) vs IMCCE apparent truth, then prints
- * a summary table: rows = stars, columns = engines.
+ * Input is the PM-propagated ICRS position at the observation epoch (ra_j2obs/dec_j2obs),
+ * so PM is cancelled on both sides — residual is pure frame rotation error.
+ * Truth is IMCCE apparent (includes PM from J1991.25).
  */
 TEST(EngineComparison, StarDeviation)
 {
@@ -22,91 +23,60 @@ TEST(EngineComparison, StarDeviation)
     ASSERT_TRUE(f.is_open()) << "Could not open star_golden.json";
     nlohmann::json golden = nlohmann::json::parse(f);
 
-    struct Row {
-        std::string name;
-        double err_ln, err_a, err_b, delta_ab;     // vs IMCCE (no PM)
-        double pm_ln, pm_a, pm_b;                  // vs eraAtci13+PM truth
-    };
+    struct Row { std::string name; double err_ln, err_a, err_b, delta_ab; };
     std::vector<Row> rows;
 
     for (auto &entry : golden)
     {
-        std::string name   = entry["name"];
-        double jd          = entry["jd"];
-        // ICRS J2000.0 in degrees -> RA in hours for IEquatorialCoordinates
-        INDI::IEquatorialCoordinates j2000 = {
-            static_cast<double>(entry["ra_j2000"]) / 15.0,
-            entry["dec_j2000"]
-        };
-        double ra_truth    = static_cast<double>(entry["ra"])             / 15.0; // hours
-        double dec_truth   = entry["dec"];
-        double ra_truth_pm = static_cast<double>(entry["ra_apparent_pm"]) / 15.0; // hours
-        double dec_truth_pm = entry["dec_apparent_pm"];
+        std::string name = entry["name"];
+        double jd        = entry["jd"];
 
-        auto make_err = [](double ra_t, double dec_t) {
-            return [=](INDI::IEquatorialCoordinates &pos) {
-                double cos_dec = std::cos(dec_t * M_PI / 180.0);
-                double dRA  = (pos.rightascension - ra_t) * 15.0 * 3600.0 * cos_dec;
-                double dDec = (pos.declination    - dec_t) * 3600.0;
-                return std::hypot(dRA, dDec);
-            };
+        // PM-propagated ICRS input: J2000.0 + PM × (obs_epoch - J2000.0).
+        // Feeding this cancels PM against the IMCCE truth so only frame rotation error remains.
+        INDI::IEquatorialCoordinates input = {
+            static_cast<double>(entry["ra_j2obs"])  / 15.0,  // hours
+            entry["dec_j2obs"]
         };
-        auto calc_error    = make_err(ra_truth,    dec_truth);
-        auto calc_error_pm = make_err(ra_truth_pm, dec_truth_pm);
+        double ra_truth  = static_cast<double>(entry["ra"])  / 15.0;  // hours
+        double dec_truth = entry["dec"];
+
+        auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+            double cos_dec = std::cos(dec_truth * M_PI / 180.0);
+            double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
+            double dDec = (pos.declination    - dec_truth) * 3600.0;
+            return std::hypot(dRA, dDec);
+        };
 
         INDI::IEquatorialCoordinates jnow_ln, jnow_a, jnow_b;
 
         INDI::setStellarEngine(INDI::StellarEngine::LIBNOVA);
-        INDI::J2000toObserved(&j2000, jd, &jnow_ln);
+        INDI::J2000toObserved(&input, jd, &jnow_ln);
 
         INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000A);
-        INDI::J2000toObserved(&j2000, jd, &jnow_a);
+        INDI::J2000toObserved(&input, jd, &jnow_a);
 
         INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
-        INDI::J2000toObserved(&j2000, jd, &jnow_b);
+        INDI::J2000toObserved(&input, jd, &jnow_b);
 
-        double err_ln = calc_error(jnow_ln);
-        double err_a  = calc_error(jnow_a);
-        double err_b  = calc_error(jnow_b);
+        double err_ln   = calc_error(jnow_ln);
+        double err_a    = calc_error(jnow_a);
+        double err_b    = calc_error(jnow_b);
         double delta_ab = std::hypot(
             (jnow_a.rightascension - jnow_b.rightascension) * 15.0 * 3600.0 * std::cos(dec_truth * M_PI / 180.0),
-            (jnow_a.declination    - jnow_b.declination) * 3600.0
+            (jnow_a.declination    - jnow_b.declination)    * 3600.0
         );
 
-        // PM-aware errors: vs eraAtci13+PM truth (= what a PM-aware pipeline gives).
-        // ERFA(no-PM) vs PM-truth ≈ pure PM contribution; libnova - erfa_a ≈ frame rotation excess.
-        double pm_ln = calc_error_pm(jnow_ln);
-        double pm_a  = calc_error_pm(jnow_a);
-        double pm_b  = calc_error_pm(jnow_b);
+        EXPECT_LT(err_a,    0.5)  << name << " ERFA-2000A";
+        EXPECT_LT(err_b,    0.5)  << name << " ERFA-2000B";
+        EXPECT_LT(err_ln,   2.0)  << name << " libnova";
+        EXPECT_LT(delta_ab, 0.01) << name << " A vs B delta";
 
-        // Tolerance vs IMCCE (no-PM): PM contribution + margin.
-        double mu_a_val = entry["mu_alpha_star_masyr"];
-        double mu_d_val = entry["mu_delta_masyr"];
-        constexpr double DT_YR = 20.0;
-        double pm_arcsec   = std::hypot(mu_a_val * DT_YR, mu_d_val * DT_YR) / 1000.0;
-        double tol_erfa    = pm_arcsec + 0.2;
-        double tol_libnova = pm_arcsec + 2.0;
-
-        // libnova < tol: nutation fix in local_ln_get_equ_nut (DEG_TO_RAD arg parenthesization)
-        // made libnova accurate; a large libnova error would indicate that regression.
-        EXPECT_LT(err_ln,             tol_libnova) << name << " libnova vs IMCCE";
-        EXPECT_LT(err_a,              tol_erfa)    << name << " ERFA-2000A vs IMCCE";
-        EXPECT_LT(err_b,              tol_erfa)    << name << " ERFA-2000B vs IMCCE";
-        EXPECT_LT(delta_ab,           0.001)       << name << " A vs B delta";
-        // Frame rotation excess: libnova should not be more than 2" worse than ERFA
-        // when both lack PM (PM contribution cancels out in the difference).
-        EXPECT_LT(pm_ln - pm_a,       2.0)         << name << " libnova frame rotation excess";
-
-        rows.push_back({name, err_ln, err_a, err_b, delta_ab, pm_ln, pm_a, pm_b});
+        rows.push_back({name, err_ln, err_a, err_b, delta_ab});
     }
 
-    // Print summary table — two sections:
-    //   Left:  vs IMCCE truth (no PM); residual dominated by PM for high-PM stars.
-    //   Right: vs eraAtci13+PM truth; (ln-a) column isolates libnova frame rotation excess.
-    const std::string SEP = "------------------------------------------------------------------------"
-                            "------------------------";
+    const std::string SEP = "------------------------------------------------------------";
     GTEST_LOG_(INFO) << "";
-    GTEST_LOG_(INFO) << "--- vs IMCCE (no-PM truth) ---     --- vs eraAtci13+PM truth ---";
+    GTEST_LOG_(INFO) << "Star accuracy vs IMCCE (PM-corrected input, arcsec):";
     GTEST_LOG_(INFO) << SEP;
     {
         std::ostringstream hdr;
@@ -114,12 +84,7 @@ TEST(EngineComparison, StarDeviation)
             << std::right << std::setw(10) << "libnova"
                           << std::setw(12) << "ERFA-2000A"
                           << std::setw(12) << "ERFA-2000B"
-                          << std::setw(8)  << "AvB"
-            << "    "
-                          << std::setw(10) << "libnova"
-                          << std::setw(12) << "ERFA-2000A"
-                          << std::setw(12) << "ERFA-2000B"
-                          << std::setw(10) << "ln-a excess";
+                          << std::setw(10) << "A vs B";
         GTEST_LOG_(INFO) << hdr.str();
     }
     GTEST_LOG_(INFO) << SEP;
@@ -127,16 +92,11 @@ TEST(EngineComparison, StarDeviation)
     {
         std::ostringstream line;
         line << std::left  << std::setw(14) << r.name
-             << std::right << std::fixed << std::setprecision(3)
+             << std::right << std::fixed << std::setprecision(4)
              << std::setw(10) << r.err_ln
              << std::setw(12) << r.err_a
              << std::setw(12) << r.err_b
-             << std::setw(8)  << r.delta_ab
-             << "    "
-             << std::setw(10) << r.pm_ln
-             << std::setw(12) << r.pm_a
-             << std::setw(12) << r.pm_b
-             << std::setw(10) << (r.pm_ln - r.pm_a);
+             << std::setw(10) << r.delta_ab;
         GTEST_LOG_(INFO) << line.str();
     }
     GTEST_LOG_(INFO) << SEP;

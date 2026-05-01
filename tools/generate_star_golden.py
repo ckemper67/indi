@@ -32,18 +32,18 @@ def fetch_imcce_truth(hip_id, name, jd):
     return sexa_to_deg(row["RA"], True), sexa_to_deg(row["DEC"], False)
 
 
-def hip_to_icrs_j2000(ra_hip_deg, dec_hip_deg, mu_alpha_star_masyr, mu_delta_masyr):
+def propagate_icrs(ra_deg, dec_deg, mu_alpha_star_masyr, mu_delta_masyr, dt_yr):
     """
-    Propagate Hipparcos J1991.25 catalog position to ICRS J2000.0.
+    Propagate an ICRS position by dt_yr years using linear proper motion.
     mu_alpha_star is mu_alpha * cos(delta) in mas/yr.
-    Returns (ra_deg, dec_deg) at J2000.0.
+    Returns (ra_deg, dec_deg) at the new epoch.
     """
-    dt = 2000.0 - 1991.25  # = 8.75 yr
-    dec_rad = math.radians(dec_hip_deg)
-    # mu_alpha_star = d(alpha)/dt * cos(delta), so raw RA rate = mu_alpha_star / cos(delta)
-    delta_ra_deg  = mu_alpha_star_masyr * dt / math.cos(dec_rad) / 1000.0 / 3600.0
-    delta_dec_deg = mu_delta_masyr      * dt                     / 1000.0 / 3600.0
-    return ra_hip_deg + delta_ra_deg, dec_hip_deg + delta_dec_deg
+    dec_rad = math.radians(dec_deg)
+    delta_ra_deg  = mu_alpha_star_masyr * dt_yr / math.cos(dec_rad) / 1000.0 / 3600.0
+    delta_dec_deg = mu_delta_masyr      * dt_yr                     / 1000.0 / 3600.0
+    return ra_deg + delta_ra_deg, dec_deg + delta_dec_deg
+
+
 
 
 def erfa_apparent_with_pm(ra_j2000_deg, dec_j2000_deg,
@@ -72,8 +72,8 @@ def erfa_apparent_with_pm(ra_j2000_deg, dec_j2000_deg,
 if __name__ == "__main__":
     test_jd = 2459019.833333  # 2020-06-19 08:00 UTC
 
-    # HIP ID -> (name, ra_hip_deg, dec_hip_deg, mu_alpha_star_masyr, mu_delta_masyr)
-    # Hipparcos J1991.25 positions and proper motions (van Leeuwen 2007).
+    # HIP ID -> (name, ra_j2000_deg, dec_j2000_deg, mu_alpha_star_masyr, mu_delta_masyr)
+    # ICRS J2000.0 positions from Hipparcos/CDS (already propagated to J2000.0 by the catalog).
     stars = {
         "102098": ("Deneb",      310.35798,  45.28034,    1.99,    1.95),
         "11767":  ("Polaris",     37.94625,  89.26411,   44.22,  -11.74),
@@ -88,7 +88,9 @@ if __name__ == "__main__":
     golden_data = []
     print(f"Generating IMCCE Star Golden Dataset for JD {test_jd}...")
 
-    for hid, (name, ra_hip, dec_hip, mu_a, mu_d) in stars.items():
+    dt_to_obs = (test_jd - 2451545.0) / 365.25  # years from J2000.0 to observation
+
+    for hid, (name, ra_j2000, dec_j2000, mu_a, mu_d) in stars.items():
         print(f"  Fetching {name}...")
         result = fetch_imcce_truth(hid, name, test_jd)
         if result is None:
@@ -96,20 +98,20 @@ if __name__ == "__main__":
             continue
         ra_app, dec_app = result
 
-        ra_j2000, dec_j2000 = hip_to_icrs_j2000(ra_hip, dec_hip, mu_a, mu_d)
-
-        ra_pm, dec_pm = erfa_apparent_with_pm(ra_j2000, dec_j2000, mu_a, mu_d, test_jd)
+        # PM-propagated input: ICRS position at the observation epoch.
+        # Feed this to each engine so PM is cancelled on both sides of the comparison.
+        ra_j2obs, dec_j2obs = propagate_icrs(ra_j2000, dec_j2000, mu_a, mu_d, dt_to_obs)
 
         golden_data.append({
             "name": name,
             "jd": test_jd,
-            "ra_j2000": round(ra_j2000, 7),
+            "ra_j2000": round(ra_j2000, 7),       # ICRS J2000.0 (bare, no PM)
             "dec_j2000": round(dec_j2000, 7),
+            "ra_j2obs": round(ra_j2obs, 7),        # ICRS at observation epoch (J2000 + PM×dt)
+            "dec_j2obs": round(dec_j2obs, 7),
             "mu_alpha_star_masyr": mu_a,
             "mu_delta_masyr": mu_d,
-            "ra_apparent_pm": round(ra_pm, 7),   # eraAtci13 with PM: KStars-equivalent truth
-            "dec_apparent_pm": round(dec_pm, 7),
-            "ra": ra_app,                         # IMCCE apparent (includes PM from J1991.25)
+            "ra": ra_app,                          # IMCCE apparent (includes PM from J1991.25)
             "dec": dec_app,
         })
         time.sleep(0.5)
