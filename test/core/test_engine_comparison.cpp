@@ -82,9 +82,10 @@ TEST(EngineComparison, StarDeviation)
         std::ostringstream hdr;
         hdr << std::left  << std::setw(14) << "Star"
             << std::right << std::setw(10) << "libnova"
-                          << std::setw(12) << "ERFA-2000A"
                           << std::setw(12) << "ERFA-2000B"
-                          << std::setw(10) << "A vs B";
+                          << std::setw(12) << "ERFA-2000A"
+                          << std::setw(14) << "B vs libnova"
+                          << std::setw(10) << "B vs A";
         GTEST_LOG_(INFO) << hdr.str();
     }
     GTEST_LOG_(INFO) << SEP;
@@ -94,9 +95,10 @@ TEST(EngineComparison, StarDeviation)
         line << std::left  << std::setw(14) << r.name
              << std::right << std::fixed << std::setprecision(4)
              << std::setw(10) << r.err_ln
-             << std::setw(12) << r.err_a
              << std::setw(12) << r.err_b
-             << std::setw(10) << r.delta_ab;
+             << std::setw(12) << r.err_a
+             << std::setw(14) << std::abs(r.err_b - r.err_ln)
+             << std::setw(10) << std::abs(r.err_b - r.err_a);
         GTEST_LOG_(INFO) << line.str();
     }
     GTEST_LOG_(INFO) << SEP;
