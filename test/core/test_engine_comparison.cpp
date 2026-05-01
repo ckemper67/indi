@@ -22,7 +22,11 @@ TEST(EngineComparison, StarDeviation)
     ASSERT_TRUE(f.is_open()) << "Could not open star_golden.json";
     nlohmann::json golden = nlohmann::json::parse(f);
 
-    struct Row { std::string name; double err_ln, err_a, err_b, delta_ab; };
+    struct Row {
+        std::string name;
+        double err_ln, err_a, err_b, delta_ab;     // vs IMCCE (no PM)
+        double pm_ln, pm_a, pm_b;                  // vs eraAtci13+PM truth
+    };
     std::vector<Row> rows;
 
     for (auto &entry : golden)
@@ -34,15 +38,21 @@ TEST(EngineComparison, StarDeviation)
             static_cast<double>(entry["ra_j2000"]) / 15.0,
             entry["dec_j2000"]
         };
-        double ra_truth  = static_cast<double>(entry["ra"])  / 15.0; // hours
-        double dec_truth = entry["dec"];
+        double ra_truth    = static_cast<double>(entry["ra"])             / 15.0; // hours
+        double dec_truth   = entry["dec"];
+        double ra_truth_pm = static_cast<double>(entry["ra_apparent_pm"]) / 15.0; // hours
+        double dec_truth_pm = entry["dec_apparent_pm"];
 
-        auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
-            double cos_dec = std::cos(dec_truth * M_PI / 180.0);
-            double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
-            double dDec = (pos.declination    - dec_truth) * 3600.0;
-            return std::hypot(dRA, dDec);
+        auto make_err = [](double ra_t, double dec_t) {
+            return [=](INDI::IEquatorialCoordinates &pos) {
+                double cos_dec = std::cos(dec_t * M_PI / 180.0);
+                double dRA  = (pos.rightascension - ra_t) * 15.0 * 3600.0 * cos_dec;
+                double dDec = (pos.declination    - dec_t) * 3600.0;
+                return std::hypot(dRA, dDec);
+            };
         };
+        auto calc_error    = make_err(ra_truth,    dec_truth);
+        auto calc_error_pm = make_err(ra_truth_pm, dec_truth_pm);
 
         INDI::IEquatorialCoordinates jnow_ln, jnow_a, jnow_b;
 
@@ -63,50 +73,73 @@ TEST(EngineComparison, StarDeviation)
             (jnow_a.declination    - jnow_b.declination) * 3600.0
         );
 
-        // J2000toObserved does not apply proper motion.  IMCCE propagates PM
-        // from the Hipparcos epoch (J1991.25) through the observation date, so
-        // the residual vs IMCCE is dominated by PM × 20yr (J2000→J2020).
-        // per-star tolerance = PM contribution + 0.2" margin for frame rotation.
-        double mu_a = entry["mu_alpha_star_masyr"];
-        double mu_d = entry["mu_delta_masyr"];
-        constexpr double DT_YR = 20.0; // J2000 -> observation epoch
-        double pm_arcsec = std::hypot(mu_a * DT_YR, mu_d * DT_YR) / 1000.0;
+        // PM-aware errors: vs eraAtci13+PM truth (= what a PM-aware pipeline gives).
+        // ERFA(no-PM) vs PM-truth ≈ pure PM contribution; libnova - erfa_a ≈ frame rotation excess.
+        double pm_ln = calc_error_pm(jnow_ln);
+        double pm_a  = calc_error_pm(jnow_a);
+        double pm_b  = calc_error_pm(jnow_b);
+
+        // Tolerance vs IMCCE (no-PM): PM contribution + margin.
+        double mu_a_val = entry["mu_alpha_star_masyr"];
+        double mu_d_val = entry["mu_delta_masyr"];
+        constexpr double DT_YR = 20.0;
+        double pm_arcsec   = std::hypot(mu_a_val * DT_YR, mu_d_val * DT_YR) / 1000.0;
         double tol_erfa    = pm_arcsec + 0.2;
         double tol_libnova = pm_arcsec + 2.0;
 
         // libnova < tol: nutation fix in local_ln_get_equ_nut (DEG_TO_RAD arg parenthesization)
         // made libnova accurate; a large libnova error would indicate that regression.
-        EXPECT_LT(err_ln, tol_libnova) << name << " libnova";
-        EXPECT_LT(err_a,  tol_erfa)    << name << " ERFA-2000A";
-        EXPECT_LT(err_b,  tol_erfa)    << name << " ERFA-2000B";
-        EXPECT_LT(delta_ab, 0.001)     << name << " A vs B delta";
+        EXPECT_LT(err_ln,             tol_libnova) << name << " libnova vs IMCCE";
+        EXPECT_LT(err_a,              tol_erfa)    << name << " ERFA-2000A vs IMCCE";
+        EXPECT_LT(err_b,              tol_erfa)    << name << " ERFA-2000B vs IMCCE";
+        EXPECT_LT(delta_ab,           0.001)       << name << " A vs B delta";
+        // Frame rotation excess: libnova should not be more than 2" worse than ERFA
+        // when both lack PM (PM contribution cancels out in the difference).
+        EXPECT_LT(pm_ln - pm_a,       2.0)         << name << " libnova frame rotation excess";
 
-        rows.push_back({name, err_ln, err_a, err_b, delta_ab});
+        rows.push_back({name, err_ln, err_a, err_b, delta_ab, pm_ln, pm_a, pm_b});
     }
 
-    // Print summary table
+    // Print summary table — two sections:
+    //   Left:  vs IMCCE truth (no PM); residual dominated by PM for high-PM stars.
+    //   Right: vs eraAtci13+PM truth; (ln-a) column isolates libnova frame rotation excess.
+    const std::string SEP = "------------------------------------------------------------------------"
+                            "------------------------";
     GTEST_LOG_(INFO) << "";
-    GTEST_LOG_(INFO) << "Star accuracy vs IMCCE apparent truth (arcsec):";
-    GTEST_LOG_(INFO) << "------------------------------------------------------------";
-    GTEST_LOG_(INFO) << std::left
-                     << std::setw(14) << "Star"
-                     << std::setw(12) << "libnova"
-                     << std::setw(12) << "ERFA-2000A"
-                     << std::setw(12) << "ERFA-2000B"
-                     << "A vs B";
-    GTEST_LOG_(INFO) << "------------------------------------------------------------";
+    GTEST_LOG_(INFO) << "--- vs IMCCE (no-PM truth) ---     --- vs eraAtci13+PM truth ---";
+    GTEST_LOG_(INFO) << SEP;
+    {
+        std::ostringstream hdr;
+        hdr << std::left  << std::setw(14) << "Star"
+            << std::right << std::setw(10) << "libnova"
+                          << std::setw(12) << "ERFA-2000A"
+                          << std::setw(12) << "ERFA-2000B"
+                          << std::setw(8)  << "AvB"
+            << "    "
+                          << std::setw(10) << "libnova"
+                          << std::setw(12) << "ERFA-2000A"
+                          << std::setw(12) << "ERFA-2000B"
+                          << std::setw(10) << "ln-a excess";
+        GTEST_LOG_(INFO) << hdr.str();
+    }
+    GTEST_LOG_(INFO) << SEP;
     for (auto &r : rows)
     {
         std::ostringstream line;
         line << std::left  << std::setw(14) << r.name
-             << std::right << std::fixed << std::setprecision(4)
-             << std::setw(10) << r.err_ln << "  "
-             << std::setw(10) << r.err_a  << "  "
-             << std::setw(10) << r.err_b  << "  "
-             << std::setw(10) << r.delta_ab;
+             << std::right << std::fixed << std::setprecision(3)
+             << std::setw(10) << r.err_ln
+             << std::setw(12) << r.err_a
+             << std::setw(12) << r.err_b
+             << std::setw(8)  << r.delta_ab
+             << "    "
+             << std::setw(10) << r.pm_ln
+             << std::setw(12) << r.pm_a
+             << std::setw(12) << r.pm_b
+             << std::setw(10) << (r.pm_ln - r.pm_a);
         GTEST_LOG_(INFO) << line.str();
     }
-    GTEST_LOG_(INFO) << "------------------------------------------------------------";
+    GTEST_LOG_(INFO) << SEP;
 }
 
 TEST(EngineComparison, Reciprocity)

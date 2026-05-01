@@ -1,8 +1,8 @@
 import requests
-import sys
 import json
 import math
 import time
+import erfa
 
 def fetch_imcce_truth(hip_id, name, jd):
     """Fetch apparent coordinates from IMCCE Miriade for a Hipparcos star."""
@@ -46,6 +46,29 @@ def hip_to_icrs_j2000(ra_hip_deg, dec_hip_deg, mu_alpha_star_masyr, mu_delta_mas
     return ra_hip_deg + delta_ra_deg, dec_hip_deg + delta_dec_deg
 
 
+def erfa_apparent_with_pm(ra_j2000_deg, dec_j2000_deg,
+                           mu_alpha_star_masyr, mu_delta_masyr, jd):
+    """
+    Compute apparent RA/Dec using eraAtci13 with proper motion applied.
+    This matches what a PM-aware pipeline (KStars, full ERFA) would produce
+    given ICRS J2000.0 input coordinates.
+    Returns (ra_deg, dec_deg) apparent of date.
+    """
+    rc = math.radians(ra_j2000_deg)
+    dc = math.radians(dec_j2000_deg)
+    # eraAtci13 expects pr = d(alpha)/dt in rad/yr (NOT mu_alpha*cos(delta))
+    pr = math.radians(mu_alpha_star_masyr / math.cos(dc) / 1000.0 / 3600.0)
+    pd = math.radians(mu_delta_masyr                     / 1000.0 / 3600.0)
+
+    utc1 = math.floor(jd) + 0.5
+    utc2 = jd - utc1
+
+    ri, di, eo = erfa.atci13(rc, dc, pr, pd, 0.0, 0.0, utc1, utc2)
+    ra_app  = math.degrees(erfa.anp(ri - eo))  # CIRS -> apparent RA via EO
+    dec_app = math.degrees(di)
+    return ra_app, dec_app
+
+
 if __name__ == "__main__":
     test_jd = 2459019.833333  # 2020-06-19 08:00 UTC
 
@@ -75,6 +98,8 @@ if __name__ == "__main__":
 
         ra_j2000, dec_j2000 = hip_to_icrs_j2000(ra_hip, dec_hip, mu_a, mu_d)
 
+        ra_pm, dec_pm = erfa_apparent_with_pm(ra_j2000, dec_j2000, mu_a, mu_d, test_jd)
+
         golden_data.append({
             "name": name,
             "jd": test_jd,
@@ -82,7 +107,9 @@ if __name__ == "__main__":
             "dec_j2000": round(dec_j2000, 7),
             "mu_alpha_star_masyr": mu_a,
             "mu_delta_masyr": mu_d,
-            "ra": ra_app,
+            "ra_apparent_pm": round(ra_pm, 7),   # eraAtci13 with PM: KStars-equivalent truth
+            "dec_apparent_pm": round(dec_pm, 7),
+            "ra": ra_app,                         # IMCCE apparent (includes PM from J1991.25)
             "dec": dec_app,
         })
         time.sleep(0.5)
