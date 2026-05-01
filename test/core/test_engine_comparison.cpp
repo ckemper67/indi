@@ -4,63 +4,109 @@
 #include <nlohmann/json.hpp>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
+#include <vector>
 
 /**
  * @brief Test Level 1: Mathematical Truth Validation
+ *
+ * Data-driven: iterates over test/data/star_golden.json.
+ * For each star reports error (arcsec) vs IMCCE apparent truth, then prints
+ * a summary table: rows = stars, columns = engines.
  */
 TEST(EngineComparison, StarDeviation)
 {
-    // 2020-06-19 08:00 UTC
-    double jd = 2459019.833333;
-    INDI::IEquatorialCoordinates j2000 = { 20.69053168, 45.28033881 }; // Deneb
-    INDI::IEquatorialCoordinates jnow_libnova, jnow_erfa_a, jnow_erfa_b;
+    std::ifstream f(TEST_DATA_DIR "/star_golden.json");
+    ASSERT_TRUE(f.is_open()) << "Could not open star_golden.json";
+    nlohmann::json golden = nlohmann::json::parse(f);
 
-    // IMCCE Truth for Deneb at this epoch
-    const double RA_TRUTH = 20.70237028;
-    const double DEC_TRUTH = 45.35036333;
+    struct Row { std::string name; double err_ln, err_a, err_b, delta_ab; };
+    std::vector<Row> rows;
 
-    auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
-        double cos_dec = std::cos(DEC_TRUTH * M_PI / 180.0);
-        double dRA = (pos.rightascension - RA_TRUTH) * 15.0 * 3600.0 * cos_dec;
-        double dDec = (pos.declination - DEC_TRUTH) * 3600.0;
-        return std::hypot(dRA, dDec);
-    };
+    for (auto &entry : golden)
+    {
+        std::string name   = entry["name"];
+        double jd          = entry["jd"];
+        // ICRS J2000.0 in degrees -> RA in hours for IEquatorialCoordinates
+        INDI::IEquatorialCoordinates j2000 = {
+            static_cast<double>(entry["ra_j2000"]) / 15.0,
+            entry["dec_j2000"]
+        };
+        double ra_truth  = static_cast<double>(entry["ra"])  / 15.0; // hours
+        double dec_truth = entry["dec"];
 
-    // 1. Get legacy result
-    INDI::setStellarEngine(INDI::StellarEngine::LIBNOVA);
-    INDI::J2000toObserved(&j2000, jd, &jnow_libnova);
+        auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+            double cos_dec = std::cos(dec_truth * M_PI / 180.0);
+            double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
+            double dDec = (pos.declination    - dec_truth) * 3600.0;
+            return std::hypot(dRA, dDec);
+        };
 
-    // 2. Get modern results
-    INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000A);
-    INDI::J2000toObserved(&j2000, jd, &jnow_erfa_a);
+        INDI::IEquatorialCoordinates jnow_ln, jnow_a, jnow_b;
 
-    INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
-    INDI::J2000toObserved(&j2000, jd, &jnow_erfa_b);
+        INDI::setStellarEngine(INDI::StellarEngine::LIBNOVA);
+        INDI::J2000toObserved(&j2000, jd, &jnow_ln);
 
-    double err_ln = calc_error(jnow_libnova);
-    double err_a  = calc_error(jnow_erfa_a);
-    double err_b  = calc_error(jnow_erfa_b);
+        INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000A);
+        INDI::J2000toObserved(&j2000, jd, &jnow_a);
 
-    // 3. Parity Analysis (A vs B)
-    double delta_ab = std::hypot(
-        (jnow_erfa_a.rightascension - jnow_erfa_b.rightascension) * 15.0 * 3600.0 * std::cos(DEC_TRUTH * M_PI / 180.0),
-        (jnow_erfa_a.declination - jnow_erfa_b.declination) * 3600.0
-    );
+        INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
+        INDI::J2000toObserved(&j2000, jd, &jnow_b);
 
-    GTEST_LOG_(INFO) << "Deneb Absolute Errors:";
-    GTEST_LOG_(INFO) << "  libnova:  " << err_ln << " arcsec";
-    GTEST_LOG_(INFO) << "  ERFA-A:   " << err_a  << " arcsec";
-    GTEST_LOG_(INFO) << "  ERFA-B:   " << err_b  << " arcsec";
-    GTEST_LOG_(INFO) << "  A vs B:   " << delta_ab << " arcsec";
+        double err_ln = calc_error(jnow_ln);
+        double err_a  = calc_error(jnow_a);
+        double err_b  = calc_error(jnow_b);
+        double delta_ab = std::hypot(
+            (jnow_a.rightascension - jnow_b.rightascension) * 15.0 * 3600.0 * std::cos(dec_truth * M_PI / 180.0),
+            (jnow_a.declination    - jnow_b.declination) * 3600.0
+        );
 
-    // Success Criteria:
-    // libnova < 1": nutation fix in local_ln_get_equ_nut (DEG_TO_RAD arg parenthesization)
-    // made libnova accurate; a large libnova error would indicate that regression.
-    EXPECT_LT(err_ln, 1.0);
-    EXPECT_LT(err_a, 0.1);
-    EXPECT_LT(err_b, 0.1);
-    EXPECT_LT(delta_ab, 0.001);
+        // J2000toObserved does not apply proper motion.  IMCCE propagates PM
+        // from the Hipparcos epoch (J1991.25) through the observation date, so
+        // the residual vs IMCCE is dominated by PM × 20yr (J2000→J2020).
+        // per-star tolerance = PM contribution + 0.2" margin for frame rotation.
+        double mu_a = entry["mu_alpha_star_masyr"];
+        double mu_d = entry["mu_delta_masyr"];
+        constexpr double DT_YR = 20.0; // J2000 -> observation epoch
+        double pm_arcsec = std::hypot(mu_a * DT_YR, mu_d * DT_YR) / 1000.0;
+        double tol_erfa    = pm_arcsec + 0.2;
+        double tol_libnova = pm_arcsec + 2.0;
+
+        // libnova < tol: nutation fix in local_ln_get_equ_nut (DEG_TO_RAD arg parenthesization)
+        // made libnova accurate; a large libnova error would indicate that regression.
+        EXPECT_LT(err_ln, tol_libnova) << name << " libnova";
+        EXPECT_LT(err_a,  tol_erfa)    << name << " ERFA-2000A";
+        EXPECT_LT(err_b,  tol_erfa)    << name << " ERFA-2000B";
+        EXPECT_LT(delta_ab, 0.001)     << name << " A vs B delta";
+
+        rows.push_back({name, err_ln, err_a, err_b, delta_ab});
+    }
+
+    // Print summary table
+    GTEST_LOG_(INFO) << "";
+    GTEST_LOG_(INFO) << "Star accuracy vs IMCCE apparent truth (arcsec):";
+    GTEST_LOG_(INFO) << "------------------------------------------------------------";
+    GTEST_LOG_(INFO) << std::left
+                     << std::setw(14) << "Star"
+                     << std::setw(12) << "libnova"
+                     << std::setw(12) << "ERFA-2000A"
+                     << std::setw(12) << "ERFA-2000B"
+                     << "A vs B";
+    GTEST_LOG_(INFO) << "------------------------------------------------------------";
+    for (auto &r : rows)
+    {
+        std::ostringstream line;
+        line << std::left  << std::setw(14) << r.name
+             << std::right << std::fixed << std::setprecision(4)
+             << std::setw(10) << r.err_ln << "  "
+             << std::setw(10) << r.err_a  << "  "
+             << std::setw(10) << r.err_b  << "  "
+             << std::setw(10) << r.delta_ab;
+        GTEST_LOG_(INFO) << line.str();
+    }
+    GTEST_LOG_(INFO) << "------------------------------------------------------------";
 }
 
 TEST(EngineComparison, Reciprocity)

@@ -160,5 +160,3 @@ Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 ## Planned Extensions
 
 **M5 — Topocentric Promotion**: Introduce `INDI::ObservationContext` mapping to `eraASTROM`. Replace `eraApci*` with `eraApco*` context builders in `EquatorialToHorizontal`, enabling diurnal aberration, polar motion, and topocentric parallax when observer location is available.
-
-**M5 — Topocentric Promotion**: Introduce `INDI::ObservationContext` mapping to `eraASTROM`. Replace `eraApci*` with `eraApco*` context builders in `EquatorialToHorizontal`, enabling diurnal aberration, polar motion, and topocentric parallax when observer location is available.
