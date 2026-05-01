@@ -73,15 +73,19 @@ if __name__ == "__main__":
     test_jd = 2459019.833333  # 2020-06-19 08:00 UTC
 
     # HIP ID -> (name, ra_j2000_deg, dec_j2000_deg, mu_alpha_star_masyr, mu_delta_masyr)
-    # ICRS J2000.0 positions from Hipparcos/CDS (already propagated to J2000.0 by the catalog).
+    # ICRS J2000.0 positions from Hipparcos-2 (van Leeuwen 2007, VizieR I/311).
+    # This is the same catalog IMCCE Miriade uses internally.
+    # Parallax note: Sirius (379 mas), Vega (130 mas), Arcturus (89 mas) have non-negligible
+    # annual parallax. IMCCE includes it; J2000toObserved (plx=0) does not. Residuals for
+    # those stars reflect this engine limitation, not catalog or frame rotation errors.
     stars = {
         "102098": ("Deneb",      310.35798,  45.28034,    1.99,    1.95),
-        "11767":  ("Polaris",     37.94625,  89.26411,   44.22,  -11.74),
-        "30438":  ("Canopus",     95.98785, -52.69567,   19.93,   23.24),
+        "11767":  ("Polaris",     37.95456,  89.26411,   44.22,  -11.74),  # was 37.94625 (wrong source)
+        "30438":  ("Canopus",     95.98796, -52.69566,   19.93,   23.24),  # was 95.98785
         "32349":  ("Sirius",     101.28715, -16.71612, -545.91,-1223.14),
         "91262":  ("Vega",       279.23473,  38.78369,  200.94,  286.23),
         "24436":  ("Rigel",       78.63447,  -8.20164,    1.31,    0.50),
-        "27989":  ("Betelgeuse",  88.79292,   7.40706,   24.95,    9.56),
+        "27989":  ("Betelgeuse",  88.79294,   7.40706,   24.95,    9.56),  # was 88.79292
         "69673":  ("Arcturus",   213.91530,  19.18241,-1093.45,-1999.40),
     }
 
