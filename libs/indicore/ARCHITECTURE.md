@@ -98,6 +98,78 @@ The library is released under an ISC-style license: permission is granted to use
 
 **`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a time-weighted amplitude filter: threshold $10^{-9}$ AU with `max_tm=0.2` (±200 yr from J2000), producing a 2.6 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.003" for Mars at JD 2459019.833333. Both engines agree with JPL DE440 geocentric to ~0.25".
 
+### Generating EPH data files
+
+The `.ctx` and `.ictx` files in `libs/indicore/eph/` are derived data — they
+are not in version control and must be generated before the first build.
+
+**Step 1 — Build the tools**
+
+Both the ASCII-to-binary converter and the INDI packer are built as part of the
+normal CMake build:
+
+```bash
+cd build
+cmake ..
+make eph_plan_bin indi_eph_packer
+```
+
+`eph_plan_bin` is defined in `libs/indicore/eph/CMakeLists.txt` and links
+against the `eph` static library. `indi_eph_packer` is in `tools/CMakeLists.txt`
+and links against the same library.
+
+**Step 2 — Generate `.ctx` binary context files**
+
+`eph_plan_bin` reads the VSOP2013 ASCII data files (`VSOP2013p1.dat` …
+`VSOP2013p8.dat`) from the current working directory and writes
+`VSOP2013_1.ctx` … `VSOP2013_8.ctx`. The ASCII data files are distributed
+separately and are not vendored; download them from:
+
+    https://ftp.imcce.fr/pub/ephem/planets/vsop2013/solution/
+
+```bash
+# Run from a directory containing the VSOP2013p*.dat files
+/path/to/build/libs/indicore/eph/eph_plan_bin
+
+# Keep the .ctx files in this working directory — they are gitignored
+# and are only needed as input to indi_eph_packer in Step 3.
+```
+
+The Moon context files (`ELP_MPP02_JPL.ctx`, `ELP_MPP02_LLR.ctx`) are
+generated separately using the `moon_bin` tool from the upstream EPH
+distribution with the ELP/MPP02 ASCII series files.
+
+**Step 3 — Pack `.ictx` files (for `EphEngineINDI`)**
+
+The INDI packer applies a truncation filter to reduce the eight planet contexts
+to ~2.6 MB total while keeping error below 0.003" vs the full theory.
+
+```bash
+mkdir -p /tmp/ictx_out
+./build/tools/indi_eph_packer \
+    /path/to/indi/libs/indicore/eph \
+    /tmp/ictx_out \
+    1e-9 0.2
+# writes VSOP2013_1.ictx … VSOP2013_8.ictx
+
+# .ictx files are committed to the repo (2.6 MB total)
+cp /tmp/ictx_out/VSOP2013_*.ictx /path/to/indi/libs/indicore/eph/
+```
+
+The packer reads each `.ctx` in order (bodies 1–8), applies the amplitude
+filter, and writes a compact variable-length `.ictx` with a 32-byte header
+(magic `ICTX`, version 2, ibody, nterms, threshold, reserved). The `ephPlanci`
+loader validates magic and version; a version mismatch is a hard error, so
+regenerate `.ictx` files any time the packer or `ephPLANctx` struct changes.
+
+**Step 4 — Verify**
+
+```bash
+cd build
+./test/core/test_eph_library        # load + compute smoke tests
+./test/core/test_engine_comparison  # validates against JPL DE440
+```
+
 ---
 
 ## Dispatch Layer

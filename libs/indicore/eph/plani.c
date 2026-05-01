@@ -87,24 +87,24 @@ int ephPlani ( char* path, int ibody, ephPLANctx* c )
 #define LS 200
    char str[LS];
 
-/* Names of the VSOP2010 files (n.b. edit if necessary) */
+/* Names of the VSOP2013 files (n.b. edit if necessary) */
 #define LFILEN 15
-   static char file[][LFILEN] = { "VSOP2010p1.dat",
-                                  "VSOP2010p2.dat",
-                                  "VSOP2010p3.dat",
-                                  "VSOP2010p4.dat",
-                                  "VSOP2010p5.dat",
-                                  "VSOP2010p6.dat",
-                                  "VSOP2010p7.dat",
-                                  "VSOP2010p8.dat" };
+   static char file[][LFILEN] = { "VSOP2013p1.dat",
+                                  "VSOP2013p2.dat",
+                                  "VSOP2013p3.dat",
+                                  "VSOP2013p4.dat",
+                                  "VSOP2013p5.dat",
+                                  "VSOP2013p6.dat",
+                                  "VSOP2013p7.dat",
+                                  "VSOP2013p8.dat" };
 
-/* Masses system (DE405) */
-   const double gmsol =    0.2959122082855911e-03;
+/* Masses system (INPOP10A) */
+   const double gmsol =    0.2959122083684144e-03;
    const double gmp[9] = { 0.4912547451450812e-10,    /* Mercury */
                            0.7243452486162703e-09,    /* Venus   */
-                           0.8997011346712499e-09,    /* EMB     */
+                           0.8997011603631609e-09,    /* EMB     */
                            0.9549535105779258e-10,    /* Mars    */
-                           0.2825345909524226e-06,    /* Jupiter */
+                           0.2825345842083778e-06,    /* Jupiter */
                            0.8459715185680659e-07,    /* Saturn  */
                            0.1292024916781969e-07,    /* Uranus  */
                            0.1524358900784276e-07 };  /* Neptune */
@@ -123,9 +123,9 @@ int ephPlani ( char* path, int ibody, ephPLANctx* c )
    lpath = strlen(path);
    if ( lpath+LFILEN > LS ) return -2;
 
-/* Rotation matrix, ecliptic to ICRS (Francou & Simon December 2015). */
-   eps = DMS(23, 26, 21.40960);
-   phi = -0.05028*AS2R;
+/* Rotation matrix, ecliptic to ICRS (Simon et al. 2013, A&A 557 A49). */
+   eps = DMS(23, 26, 21.41136);
+   phi = -0.05188*AS2R;
    ceps = cos(eps);
    seps = sin(eps);
    cphi = cos(phi);
@@ -145,52 +145,52 @@ int ephPlani ( char* path, int ibody, ephPLANctx* c )
    c->rgm = sqrt(gmp[ibo]+gmsol);
 
 /* Mean longitudes at J2000.0 etc. (radian). */
-   c->ci0[ 0] = 4.402608634958;            /* Mercury */
-   c->ci0[ 1] = 3.176134454599;            /* Venus */
-   c->ci0[ 2] = 1.753470407365;            /* EMB */
-   c->ci0[ 3] = 6.203499866531;            /* Mars */
-   c->ci0[ 4] = 4.091362210690;            /* Vesta */
-   c->ci0[ 5] = 1.713743790353;            /* Iris */
-   c->ci0[ 6] = 5.598651923117;            /* Bamberga */
-   c->ci0[ 7] = 2.805135511956;            /* Ceres */
-   c->ci0[ 8] = 2.326992146758;            /* Pallas */
-   c->ci0[ 9] = 0.599546097920;            /* Jupiter */
-   c->ci0[10] = 0.874018344970;            /* Saturn */
-   c->ci0[11] = 5.481224786038;            /* Uranus */
-   c->ci0[12] = 5.311894573453;            /* Neptune */
+   c->ci0[ 0] = 4.4026086316690000;        /* Mercury */
+   c->ci0[ 1] = 3.1761344615760000;        /* Venus */
+   c->ci0[ 2] = 1.7534703694330000;        /* EMB */
+   c->ci0[ 3] = 6.2035000141410000;        /* Mars */
+   c->ci0[ 4] = 4.0913600030500000;        /* Vesta */
+   c->ci0[ 5] = 1.7137407191730000;        /* Iris */
+   c->ci0[ 6] = 5.5986412922870000;        /* Bamberga */
+   c->ci0[ 7] = 2.8051363604080000;        /* Ceres */
+   c->ci0[ 8] = 2.3269897346200000;        /* Pallas */
+   c->ci0[ 9] = 0.5995461070350000;        /* Jupiter */
+   c->ci0[10] = 0.8740185101070000;        /* Saturn */
+   c->ci0[11] = 5.4812253956630000;        /* Uranus */
+   c->ci0[12] = 5.3118979331640000;        /* Neptune */
    c->ci0[13] = 0.0;                       /* not used (Pluto) */
    c->ci0[14] = 5.19846640063;             /* Moon (D) */
    c->ci0[15] = 1.62790513602;             /* Moon (F) */
    c->ci0[16] = 2.35555563875;             /* Moon (l) */
 
 /* Mean motions in longitude (radian/cy). */
-   c->ci1[ 0] = 0.2608790314074786e5;      /* Mercury */
-   c->ci1[ 1] = 0.1021328554727840e5;      /* Venus */
-   c->ci1[ 2] = 0.6283075850238015e4;      /* EMB */
-   c->ci1[ 3] = 0.3340612433480507e4;      /* Mars */
-   c->ci1[ 4] = 0.1731170540074402e4;      /* Vesta */
-   c->ci1[ 5] = 0.1704450784022772e4;      /* Iris */
-   c->ci1[ 6] = 0.1428949097282629e4;      /* Bamberga */
-   c->ci1[ 7] = 0.1364756486739947e4;      /* Ceres */
-   c->ci1[ 8] = 0.1361923496417814e4;      /* Pallas */
-   c->ci1[ 9] = 0.5296909681760810e3;      /* Jupiter */
-   c->ci1[10] = 0.2132990860917330e3;      /* Saturn */
-   c->ci1[11] = 0.7478165380027799e2;      /* Uranus */
-   c->ci1[12] = 0.3813292737322700e2;      /* Neptune */
-   c->ci1[13] = 0.3595362366859080;        /* not used (Pluto) */
+   c->ci1[ 0] = 0.2608790314068555e5;      /* Mercury */
+   c->ci1[ 1] = 0.1021328554743445e5;      /* Venus */
+   c->ci1[ 2] = 0.6283075850353215e4;      /* EMB */
+   c->ci1[ 3] = 0.3340612434145457e4;      /* Mars */
+   c->ci1[ 4] = 0.1731170452721855e4;      /* Vesta */
+   c->ci1[ 5] = 0.1704450855027201e4;      /* Iris */
+   c->ci1[ 6] = 0.1428948917844273e4;      /* Bamberga */
+   c->ci1[ 7] = 0.1364756513629990e4;      /* Ceres */
+   c->ci1[ 8] = 0.1361923207632842e4;      /* Pallas */
+   c->ci1[ 9] = 0.5296909615623250e3;      /* Jupiter */
+   c->ci1[10] = 0.2132990861084880e3;      /* Saturn */
+   c->ci1[11] = 0.7478165903077800e2;      /* Uranus */
+   c->ci1[12] = 0.3813297222612500e2;      /* Neptune */
+   c->ci1[13] = 0.3595362285049309;        /* not used (Pluto) */
    c->ci1[14] = 0.777137714481804e5;       /* Moon (D) */
    c->ci1[15] = 0.843346615717837e5;       /* Moon (F) */
    c->ci1[16] = 0.832869142477147e5;       /* Moon (l) */
 
 /* Planetary frequency in longitude. */
-   c->freqpla[0] = 0.2608790314074786e5;   /* Mercury */
-   c->freqpla[1] = 0.1021328554727840e5;   /* Venus */
-   c->freqpla[2] = 0.6283075850238015e4;   /* EMB */
-   c->freqpla[3] = 0.3340612433480507e4;   /* Mars */
-   c->freqpla[4] = 0.5296909681760810e3;   /* Jupiter */
-   c->freqpla[5] = 0.2132990860917330e3;   /* Saturn */
-   c->freqpla[6] = 0.7478165380027799e2;   /* Uranus */
-   c->freqpla[7] = 0.3813292737322700e2;   /* Neptune */
+   c->freqpla[0] = 0.2608790314068555e5;   /* Mercury */
+   c->freqpla[1] = 0.1021328554743445e5;   /* Venus */
+   c->freqpla[2] = 0.6283075850353215e4;   /* EMB */
+   c->freqpla[3] = 0.3340612434145457e4;   /* Mars */
+   c->freqpla[4] = 0.5296909615623250e3;   /* Jupiter */
+   c->freqpla[5] = 0.2132990861084880e3;   /* Saturn */
+   c->freqpla[6] = 0.7478165903077800e2;   /* Uranus */
+   c->freqpla[7] = 0.3813297222612500e2;   /* Neptune */
 
 /* Open the VSOP2010 file for this body. */
    strncpy ( str, path, LS );

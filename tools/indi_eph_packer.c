@@ -2,14 +2,14 @@
 **  i n d i _ e p h _ p a c k e r
 **
 **  Produce compact INDI packed ephemeris (.ictx) files from the full
-**  VSOP2010 binary .ctx files.
+**  VSOP2013 binary .ctx files.
 **
 **  Usage:
 **     indi_eph_packer <ctx_dir> <output_dir> [threshold [max_tm]]
 **
 **  Arguments:
-**     ctx_dir     directory containing VSOP2010_#.ctx files
-**     output_dir  directory for output VSOP2010_#.ictx files
+**     ctx_dir     directory containing VSOP2013_#.ctx files
+**     output_dir  directory for output VSOP2013_#.ictx files
 **     threshold   amplitude filter (AU); default 1e-9
 **     max_tm      target epoch limit in Julian millennia from J2000;
 **                 default 0.0 (no time weighting).
@@ -17,7 +17,7 @@
 **                 if hypot(ss,cc) * max_tm^it >= threshold.
 **                 Example: 0.2 covers +-200 years from J2000 (1800-2200).
 **
-**  The .ictx format stores only VSOP2010 terms whose effective amplitude
+**  The .ictx format stores only VSOP2013 terms whose effective amplitude
 **  survives the filter, in a compact variable-length binary.
 **  The loader ephPlanci() reads .ictx directly into ephPLANctx so
 **  ephPlanet / ephRdplan require no changes.
@@ -34,7 +34,7 @@
 #include <stdint.h>
 
 #define ICTX_MAGIC   0x49435458u   /* "ICTX" */
-#define ICTX_VERSION 1u
+#define ICTX_VERSION 2u
 
 /* Survival test: keep term if its contribution at max_tm is >= threshold.
    When max_tm == 0.0, only raw amplitude is checked (no time weighting). */
@@ -52,7 +52,7 @@ static int pack_planet(int ibody, const char* ctx_dir, const char* out_dir,
 {
     char ctx_path[512], out_path[512];
     snprintf(ctx_path, sizeof(ctx_path), "%s/", ctx_dir);
-    snprintf(out_path, sizeof(out_path), "%s/VSOP2010_%d.ictx", out_dir, ibody);
+    snprintf(out_path, sizeof(out_path), "%s/VSOP2013_%d.ictx", out_dir, ibody);
 
     /* Load the full binary context */
     int status = ephPlanc(ibody, ctx_path, c);
@@ -206,7 +206,7 @@ int main(int argc, char* argv[])
 
         /* accumulate output size */
         char path[512];
-        snprintf(path, sizeof(path), "%s/VSOP2010_%d.ictx", out_dir, ibody);
+        snprintf(path, sizeof(path), "%s/VSOP2013_%d.ictx", out_dir, ibody);
         FILE* f = fopen(path, "rb");
         if (f) { fseek(f, 0, SEEK_END); total_bytes += ftell(f); fclose(f); }
     }

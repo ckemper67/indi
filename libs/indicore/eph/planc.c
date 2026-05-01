@@ -81,7 +81,7 @@ int ephPlanc ( int ibody, char* path, ephPLANctx* c )
 {
 /* Name of binary file (# = body number) */
 #define LF (15)
-   char namef[LF] = "VSOP2010_#.ctx";
+   char namef[LF] = "VSOP2013_#.ctx";
    char fname[LF];
 
    FILE* fp;

@@ -38,18 +38,18 @@
 */
 
 #define ICTX_MAGIC   0x49435458u   /* "ICTX" */
-#define ICTX_VERSION 1u
+#define ICTX_VERSION 2u
 
 #define LFILE 20
 static const char* ictx_names[] = {
-    "VSOP2010_1.ictx",   /* Mercury */
-    "VSOP2010_2.ictx",   /* Venus   */
-    "VSOP2010_3.ictx",   /* EMB     */
-    "VSOP2010_4.ictx",   /* Mars    */
-    "VSOP2010_5.ictx",   /* Jupiter */
-    "VSOP2010_6.ictx",   /* Saturn  */
-    "VSOP2010_7.ictx",   /* Uranus  */
-    "VSOP2010_8.ictx",   /* Neptune */
+    "VSOP2013_1.ictx",   /* Mercury */
+    "VSOP2013_2.ictx",   /* Venus   */
+    "VSOP2013_3.ictx",   /* EMB     */
+    "VSOP2013_4.ictx",   /* Mars    */
+    "VSOP2013_5.ictx",   /* Jupiter */
+    "VSOP2013_6.ictx",   /* Saturn  */
+    "VSOP2013_7.ictx",   /* Uranus  */
+    "VSOP2013_8.ictx",   /* Neptune */
 };
 
 int ephPlanci(int ibody, char* path, ephPLANctx* c)

@@ -22,7 +22,7 @@ int main ( )
 
 /* Name of binary file */
 #define LF (15)
-   char namef[LF] = "VSOP2010_#.ctx";
+   char namef[LF] = "VSOP2013_#.ctx";
    char fname[LF];
 
    FILE* fp;
