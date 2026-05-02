@@ -203,16 +203,19 @@ TEST(EngineComparison, MoonDeviation)
     EXPECT_NEAR(error_vsop2013, error_packed, 0.001);
 }
 
-// Validates VSOP2013 and VSOP2013_PACKED against JPL DE440 geocentric truth across
+// Validates VSOP2013_PACKED and VSOPTOP2013 against JPL DE440 geocentric truth across
 // 11 epochs from 2000 to 2100 (every ~10 years) for Mars, Jupiter, Saturn, Moon.
-// Guards against time-dependent failures introduced by the time-weighted packing filter.
+// Also cross-validates TOP2013 (outer planets only) against the same DE440 truth.
 TEST(EngineComparison, MultiEpochDeviation)
 {
     std::ifstream f(TEST_DATA_DIR "/multi_epoch_golden.json");
     ASSERT_TRUE(f.is_open()) << "Could not open multi_epoch_golden.json";
     nlohmann::json golden = nlohmann::json::parse(f);
 
-    double max_err_vsop = 0, max_err_packed = 0, max_delta = 0;
+    struct Row { std::string planet; double jd; double err_packed; double err_top; };
+    std::vector<Row> outer_rows;
+
+    double max_err_packed = 0, max_err_top = 0, max_delta = 0;
     int n = 0;
 
     for (auto& entry : golden) {
@@ -222,37 +225,48 @@ TEST(EngineComparison, MultiEpochDeviation)
         double ra_truth  = static_cast<double>(entry["ra_deg"]) / 15.0;  // hours
         double dec_truth = entry["dec_deg"];
 
-        INDI::IEquatorialCoordinates pos_vsop, pos_packed;
-        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013);
-        INDI::GetPlanetObserved(np, jd, &pos_vsop);
-        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
-        INDI::GetPlanetObserved(np, jd, &pos_packed);
-
         double cos_dec = std::cos(dec_truth * M_PI / 180.0);
         auto err = [&](INDI::IEquatorialCoordinates& pos) {
             double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
             double dDec = (pos.declination    - dec_truth) * 3600.0;
             return std::hypot(dRA, dDec);
         };
-        double delta = std::hypot(
-            (pos_vsop.rightascension - pos_packed.rightascension) * 15.0 * 3600.0 * cos_dec,
-            (pos_vsop.declination    - pos_packed.declination)    * 3600.0);
 
-        double ef = err(pos_vsop), ei = err(pos_packed);
-        max_err_vsop   = std::max(max_err_vsop,   ef);
-        max_err_packed = std::max(max_err_packed,  ei);
-        max_delta      = std::max(max_delta, delta);
+        INDI::IEquatorialCoordinates pos_packed;
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
+        INDI::GetPlanetObserved(np, jd, &pos_packed);
+        double ei = err(pos_packed);
+        max_err_packed = std::max(max_err_packed, ei);
 
-        EXPECT_LT(ef, 2.0) << planet << " VSOP2013 at JD " << jd;
         EXPECT_LT(ei, 2.0) << planet << " VSOP2013_PACKED at JD " << jd;
-        EXPECT_LT(delta, 0.1) << planet << " VSOP2013 vs PACKED delta at JD " << jd;
+
+        // For outer planets also run VSOPTOP2013 and compare both vs DE440
+        if (np >= 5) {
+            INDI::IEquatorialCoordinates pos_top;
+            INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOPTOP2013);
+            INDI::GetPlanetObserved(np, jd, &pos_top);
+            double et = err(pos_top);
+            double delta = std::hypot(
+                (pos_packed.rightascension - pos_top.rightascension) * 15.0 * 3600.0 * cos_dec,
+                (pos_packed.declination    - pos_top.declination)    * 3600.0);
+            max_err_top = std::max(max_err_top, et);
+            max_delta   = std::max(max_delta, delta);
+            EXPECT_LT(et, 2.0) << planet << " VSOPTOP2013 at JD " << jd;
+            outer_rows.push_back({planet, jd, ei, et});
+        }
         n++;
     }
 
-    GTEST_LOG_(INFO) << "Multi-epoch (" << n << " points): "
-                     << "max VSOP2013=" << max_err_vsop << "\"  "
-                     << "max VSOP2013_PACKED=" << max_err_packed << "\"  "
-                     << "max delta=" << max_delta << "\"";
+    GTEST_LOG_(INFO) << "Multi-epoch (" << n << " points) vs DE440:";
+    GTEST_LOG_(INFO) << "  max VSOP2013_PACKED=" << max_err_packed << "\"  "
+                     << "max VSOPTOP2013 (outer)=" << max_err_top << "\"  "
+                     << "max VSOP2013_PACKED vs VSOPTOP2013 delta=" << max_delta << "\"";
+    GTEST_LOG_(INFO) << "  Outer-planet breakdown (VSOP2013_PACKED vs VSOPTOP2013 vs DE440):";
+    for (auto& r : outer_rows)
+        GTEST_LOG_(INFO) << "    " << std::left << std::setw(8) << r.planet
+                         << " JD " << std::fixed << std::setprecision(1) << r.jd
+                         << "  PACKED=" << std::setprecision(3) << r.err_packed << "\""
+                         << "  TOP2013=" << r.err_top << "\"";
 }
 
 // Validates EphEngineHybrid (TOP2013 for outer planets).

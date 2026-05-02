@@ -245,14 +245,17 @@ The split provides cross-validation between two independent ephemeris models (IN
 | ERFA-2000A | Deneb apparent position | 0.050" |
 | ERFA-2000B | Deneb apparent position | 0.050" |
 | ERFA A vs B delta | — | 0.000264" |
-| libnova planetary | Mars geocentric (2020) | 1008" |
-| EPH-Full | Mars geocentric (2020) | 0.26" vs DE440 |
-| EPH-Full | Moon geocentric (2020) | 0.25" vs DE440 |
-| EPH-INDI vs EPH-Full | Mars geocentric (2020) | 0.003" |
-| EPH-Hybrid vs EPH-Full | Jupiter geocentric (2020) | 1.2" |
-| EPH-Hybrid vs EPH-Full | Saturn geocentric (2020) | 0.6" |
-| EPH-Hybrid vs EPH-Full | Uranus geocentric (2020) | 0.1" |
-| EPH-Hybrid vs EPH-Full | Neptune geocentric (2020) | 0.2" |
+| libnova planetary | Mars geocentric (2020) | 1013" vs DE440 |
+| VSOP2013_PACKED | Mars geocentric (2020) | 0.26" vs DE440 |
+| VSOP2013_PACKED | Moon geocentric (2020) | 0.25" vs DE440 |
+| VSOP2013 vs VSOP2013_PACKED | Mars geocentric (2020) | 0.003" |
+| VSOP2013_PACKED | Jupiter geocentric (2000–2100, 11 epochs) | max 0.43" vs DE440 |
+| VSOP2013_PACKED | Saturn geocentric (2000–2100, 11 epochs) | max 0.37" vs DE440 |
+| VSOPTOP2013 | Jupiter geocentric (2000–2100, 11 epochs) | max 0.38" vs DE440 |
+| VSOPTOP2013 | Saturn geocentric (2000–2100, 11 epochs) | max 0.37" vs DE440 |
+| VSOP2013_PACKED vs VSOPTOP2013 | outer planets (2000–2100) | max delta 0.004" |
+
+**TOP2013 vs VSOP2013 for outer planets**: within the modern epoch (2000–2100 AD), TOP2013 and VSOP2013 agree to within 0.004" and both achieve sub-0.4" accuracy vs JPL DE440 for Jupiter and Saturn. TOP2013's theoretical advantage over VSOP2013 only materialises at very long timescales (centuries to millennia from J2000); within the operational window for INDI it is negligible.
 
 Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
@@ -267,8 +270,62 @@ Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 | `libs/indicore/CoordinateEngine.h` | `ICoordinateEngine`, `IPlanetaryEngine`, factory function declarations |
 | `libs/indicore/ErfaEngine.cpp` | `ErfaEngine2000A`, `ErfaEngine2000B`, `eraApci00b`/`eraAtci00b` wrappers |
 | `libs/indicore/LibnovaEngine.cpp` | `LibnovaStellarEngine`, `LibnovaPlanetaryEngine` |
-| `libs/indicore/EphEngine.cpp` | `EphEngineFull`, `EphEngineINDI`, `EphEngineHybrid` |
+| `libs/indicore/EphEngine.cpp` | `EphEngineFull` (`VSOP2013`), `EphEngineINDI` (`VSOP2013_PACKED`), `EphEngineHybrid` (`VSOPTOP2013`) |
 | `libs/indicore/eph/` | EPH library source; `.ictx`/`.tictx` data files committed; `.ctx`/`.tctx` gitignored |
+
+---
+
+## Running the Tests
+
+### Build system
+
+The project uses an **in-source CMake build** — `CMakeCache.txt` lives at the repo root and all build artifacts land in-tree. Always use `cmake --build` from the repo root to rebuild; using sub-directory `Makefile`s directly will not recompile when headers change:
+
+```bash
+# Rebuild a single test binary (picks up all header and library changes)
+cmake --build /path/to/indi --target test_engine_comparison
+cmake --build /path/to/indi --target test_eph_library
+
+# Rebuild everything
+cmake --build /path/to/indi
+```
+
+The test binaries land at:
+```
+test/core/test_engine_comparison
+test/core/test_eph_library
+```
+
+### Runtime data dependencies
+
+`EphEngine.cpp` locates data files via `INDI_DATA_DIR "/eph/"`, which CMake bakes in as `<repo>/libs/indicore/eph/` at compile time.
+
+| File type | Location | Status | Required by |
+|-----------|----------|--------|-------------|
+| `VSOP2013_*.ictx` (8 files, ~2.6 MB) | `libs/indicore/eph/` | **committed** | `VSOP2013_PACKED`, `VSOPTOP2013` (inner) |
+| `TOP2013_*.tictx` (4 files, ~0.74 MB) | `libs/indicore/eph/` | **committed** | `VSOPTOP2013` (outer) |
+| `ELP_MPP02_JPL.ctx` | `libs/indicore/eph/` | gitignored, must generate | Moon (all EPH engines) |
+| `VSOP2013_*.ctx` (8 files) | `libs/indicore/eph/` | gitignored, must generate | `VSOP2013` (full) only |
+| `TOP2013_*.tctx` (4 files) | any | gitignored, intermediate | input to packer only |
+
+**After a fresh clone, `VSOP2013_PACKED` and `VSOPTOP2013` work immediately** — their packed data files are committed. `VSOP2013` (full, untruncated) requires generating `.ctx` files; see "Generating EPH data files" above.
+
+`TEST_DATA_DIR` for golden JSON files is baked in as `<repo>/test/data/` — the JSON files are committed and always available.
+
+### Running
+
+```bash
+# All engine comparison tests (stars, planets, multi-epoch, hybrid)
+./test/core/test_engine_comparison
+
+# Run a specific test
+./test/core/test_engine_comparison --gtest_filter="EngineComparison.MultiEpochDeviation"
+
+# EPH library load and compute smoke tests
+./test/core/test_eph_library
+```
+
+The `MultiEpochDeviation` test (~150 ms) is the most informative: it validates VSOP2013_PACKED and VSOPTOP2013 against JPL DE440 across 11 epochs from 2000 to 2100 for Mars, Jupiter, Saturn, and Moon.
 
 ---
 

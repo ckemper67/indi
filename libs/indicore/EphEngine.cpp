@@ -177,7 +177,8 @@ public:
                 m_current_top = np;
             }
 
-            /* Need EMB context to derive Sun-to-geocenter in ephRdtop. */
+            /* Need EMB and Moon contexts: rdtop uses Moon pv to shift EMB
+               to geocenter (error is ~4700 km = 1.2" for Jupiter if omitted). */
             if (!m_cemb) {
                 m_cemb = std::make_unique<ephPLANctx>();
                 int st = ephPlanci(3, const_cast<char*>(data_path), m_cemb.get());
@@ -185,13 +186,16 @@ public:
                     st = ephPlanc(3, const_cast<char*>(data_path), m_cemb.get());
                 if (st != 0) { m_cemb.reset(); return; }
             }
+            if (!m_cmoon) {
+                m_cmoon = std::make_unique<ephMOONctx>();
+                if (ephMoonc(const_cast<char*>(data_path), EPH_MOON_DE405, m_cmoon.get()) != 0) {
+                    m_cmoon.reset(); return;
+                }
+            }
 
-            double pvemb[2][3];
+            double pvemb[2][3], pvmoon[2][3];
             ephPlanet(3, m_cemb.get(), tdb_mjd, pvemb);
-
-            /* Pass zero Moon pv: geocentric mode (hm=-1e6) ignores it for
-               outer planets (EMB/Moon displacement is ~4700 km, negligible). */
-            double pvmoon[2][3] = {{0,0,0},{0,0,0}};
+            ephMoon(m_cmoon.get(), tdb_mjd, pvmoon);
 
             double rast, dast, rapp, dapp, eo, diam;
             ephRdtop(pvmoon, pvemb, m_ctop.get(), ut1_mjd, tdb_mjd, np, 0, 0, -1e6,
