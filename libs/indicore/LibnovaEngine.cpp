@@ -97,10 +97,37 @@ public:
         position->rightascension = equatorialPos.ra / 15.0;
         position->declination = equatorialPos.dec;
     }
+
+    // libnova has no topocentric support; all typed methods fall back to geocentric.
+    void J2000toGeocentric(const INDI::J2000Coordinates *j2000, double jd, INDI::GeocentricApparent *out) override {
+        J2000toObserved(const_cast<INDI::J2000Coordinates*>(j2000), jd, out);
+    }
+
+    void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
+        ObservedToJ2000(const_cast<INDI::GeocentricApparent*>(apparent), jd, out);
+    }
+
+    void J2000toTopocentric(const INDI::J2000Coordinates *j2000, INDI::AstrometricContext &ctx, double jd,
+                            INDI::TopocentricApparent *out) override {
+        INDI_UNUSED(ctx);
+        J2000toObserved(const_cast<INDI::J2000Coordinates*>(j2000), jd, out);
+    }
+
+    void TopocentricToJ2000(const INDI::TopocentricApparent *apparent, INDI::AstrometricContext &ctx, double jd,
+                            INDI::J2000Coordinates *out) override {
+        INDI_UNUSED(ctx);
+        ObservedToJ2000(const_cast<INDI::TopocentricApparent*>(apparent), jd, out);
+    }
 };
 
 class LibnovaPlanetaryEngine : public IPlanetaryEngine {
 public:
+    void GetPlanetTopocentric(int np, double jd, INDI::AstrometricContext &ctx,
+                              INDI::TopocentricApparent *out) override {
+        INDI_UNUSED(ctx);
+        GetPlanetObserved(np, jd, out);
+    }
+
     void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) override {
         struct ln_equ_posn equatorialPos;
         switch(np) {

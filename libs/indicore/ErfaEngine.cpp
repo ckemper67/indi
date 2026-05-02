@@ -9,6 +9,7 @@
 #include <memory>
 
 #ifdef HAVE_ERFA
+
 static void eraApci00b(double date1, double date2, eraASTROM *astrom, double *eo)
 {
     double ehpv[2][3], ebpv[2][3], r[3][3], x, y, s;
@@ -45,6 +46,49 @@ static void eraApco00b(double utc1, double utc2, double dut1,
     eraApci(utc1, utc2, ebpv, ehpv[0], x, y, s, astrom);
     eraApio13(utc1, utc2, dut1, elong, phi, hm, xp, yp, phpa, tc, rh, wl, astrom);
     *eo = eraEors(r, s);
+}
+
+static bool observerChanged(const INDI::AstrometricContext &ctx)
+{
+    return ctx.observer.longitude != ctx.cached_observer.longitude ||
+           ctx.observer.latitude  != ctx.cached_observer.latitude  ||
+           ctx.observer.elevation != ctx.cached_observer.elevation;
+}
+
+static void ensureAstrom2000B(INDI::AstrometricContext &ctx, double jd)
+{
+    if (ctx.cache_valid &&
+        std::abs(jd - ctx.cached_jd) <= ctx.jd_tolerance &&
+        !observerChanged(ctx))
+        return;
+    double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+    eraApco00b(utc1, utc2, ctx.dut1,
+               DEG_TO_RAD(ctx.observer.longitude), DEG_TO_RAD(ctx.observer.latitude),
+               ctx.observer.elevation,
+               DEG_TO_RAD(ctx.xp / 3600.0), DEG_TO_RAD(ctx.yp / 3600.0),
+               ctx.pressure_hPa, ctx.temp_C, ctx.humidity, ctx.wavelength_um,
+               &ctx.astrom, &ctx.eo);
+    ctx.cached_jd       = jd;
+    ctx.cached_observer = ctx.observer;
+    ctx.cache_valid     = true;
+}
+
+static void ensureAstrom2000A(INDI::AstrometricContext &ctx, double jd)
+{
+    if (ctx.cache_valid &&
+        std::abs(jd - ctx.cached_jd) <= ctx.jd_tolerance &&
+        !observerChanged(ctx))
+        return;
+    double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+    eraApco13(utc1, utc2, ctx.dut1,
+              DEG_TO_RAD(ctx.observer.longitude), DEG_TO_RAD(ctx.observer.latitude),
+              ctx.observer.elevation,
+              DEG_TO_RAD(ctx.xp / 3600.0), DEG_TO_RAD(ctx.yp / 3600.0),
+              ctx.pressure_hPa, ctx.temp_C, ctx.humidity, ctx.wavelength_um,
+              &ctx.astrom, &ctx.eo);
+    ctx.cached_jd       = jd;
+    ctx.cached_observer = ctx.observer;
+    ctx.cache_valid     = true;
 }
 
 #endif
@@ -116,6 +160,63 @@ public:
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
 #endif
     }
+
+    void J2000toGeocentric(const INDI::J2000Coordinates *j2000, double jd, INDI::GeocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double rc, dc, eo;
+        eraAtci13(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
+                  0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+        out->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
+        out->declination    = RAD_TO_DEG(dc);
+#else
+        INDI_UNUSED(j2000); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        eraASTROM astrom;
+        double eo;
+        eraApci13(utc1, utc2, &astrom, &eo);
+        double ri, di;
+        eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + eo), DEG_TO_RAD(apparent->declination),
+                 &astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(apparent); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void J2000toTopocentric(const INDI::J2000Coordinates *j2000, INDI::AstrometricContext &ctx, double jd,
+                            INDI::TopocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        ensureAstrom2000A(ctx, jd);
+        double ri, di;
+        eraAtciq(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
+                 0, 0, 0, 0, &ctx.astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri - ctx.eo));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(j2000); INDI_UNUSED(ctx); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void TopocentricToJ2000(const INDI::TopocentricApparent *apparent, INDI::AstrometricContext &ctx, double jd,
+                            INDI::J2000Coordinates *out) override {
+#ifdef HAVE_ERFA
+        ensureAstrom2000A(ctx, jd);
+        double ri, di;
+        eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + ctx.eo), DEG_TO_RAD(apparent->declination),
+                 &ctx.astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(apparent); INDI_UNUSED(ctx); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
 };
 
 class ErfaEngine2000B : public ICoordinateEngine {
@@ -183,6 +284,63 @@ public:
         position->declination    = RAD_TO_DEG(di);
 #else
         INDI_UNUSED(object); INDI_UNUSED(observer); INDI_UNUSED(JD); INDI_UNUSED(position);
+#endif
+    }
+
+    void J2000toGeocentric(const INDI::J2000Coordinates *j2000, double jd, INDI::GeocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double rc, dc, eo;
+        eraAtci00b(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
+                   0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+        out->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
+        out->declination    = RAD_TO_DEG(dc);
+#else
+        INDI_UNUSED(j2000); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        eraASTROM astrom;
+        double eo;
+        eraApci00b(utc1, utc2, &astrom, &eo);
+        double ri, di;
+        eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + eo), DEG_TO_RAD(apparent->declination),
+                 &astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(apparent); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void J2000toTopocentric(const INDI::J2000Coordinates *j2000, INDI::AstrometricContext &ctx, double jd,
+                            INDI::TopocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        ensureAstrom2000B(ctx, jd);
+        double ri, di;
+        eraAtciq(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
+                 0, 0, 0, 0, &ctx.astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri - ctx.eo));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(j2000); INDI_UNUSED(ctx); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void TopocentricToJ2000(const INDI::TopocentricApparent *apparent, INDI::AstrometricContext &ctx, double jd,
+                            INDI::J2000Coordinates *out) override {
+#ifdef HAVE_ERFA
+        ensureAstrom2000B(ctx, jd);
+        double ri, di;
+        eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + ctx.eo), DEG_TO_RAD(apparent->declination),
+                 &ctx.astrom, &ri, &di);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(apparent); INDI_UNUSED(ctx); INDI_UNUSED(jd); INDI_UNUSED(out);
 #endif
     }
 };

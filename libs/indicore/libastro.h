@@ -29,6 +29,9 @@
 #pragma once
 
 #include <libnova/utility.h>
+#ifdef HAVE_ERFA
+#include <erfa.h>
+#endif
 
 namespace INDI
 {
@@ -70,6 +73,56 @@ typedef struct
 
 /*@}*/
 
+/**
+ * @brief Frame-tagged subtypes of IEquatorialCoordinates.
+ *
+ * Zero-cost C++ subtypes — layout-identical to IEquatorialCoordinates.
+ * Use these in new code so the compiler rejects mismatched frames at the
+ * call site. Existing code using IEquatorialCoordinates* is unaffected.
+ */
+struct J2000Coordinates    : IEquatorialCoordinates {};  ///< ICRS / J2000.0 catalog position
+struct GeocentricApparent  : IEquatorialCoordinates {};  ///< Geocentric CIRS apparent (output of J2000toObserved)
+struct TopocentricApparent : IEquatorialCoordinates {};  ///< Topocentric CIRS apparent (parallax-corrected)
+
+/**
+ * @brief Observer location and precomputed astrometric context.
+ *
+ * Set the input fields (observer, dut1, …) once, then pass the same context
+ * to multiple J2000toTopocentric / GetPlanetTopocentric calls at the same JD.
+ * The engine populates the cached ASTROM on first use and reuses it for every
+ * subsequent call at the same JD, avoiding redundant nutation computation.
+ *
+ * The cached_* and astrom fields are managed by the engine — do not set them
+ * directly.
+ */
+struct AstrometricContext {
+    IGeographicCoordinates observer{};  ///< lon (0–360 E deg), lat (deg), elev (m)
+    double dut1          = 0.0;         ///< UT1–UTC (seconds)
+    double xp            = 0.0;         ///< polar motion x (arcsec)
+    double yp            = 0.0;         ///< polar motion y (arcsec)
+    double pressure_hPa  = 0.0;         ///< atmospheric pressure (0 = no refraction)
+    double temp_C        = 15.0;        ///< temperature (Celsius)
+    double humidity      = 0.5;         ///< relative humidity (0–1)
+    double wavelength_um = 0.55;        ///< observation wavelength (micron)
+
+    // Tolerance for JD cache reuse (days). The ASTROM components (BPN matrix,
+    // aberration vector, observer position) drift slowly enough that 1 minute
+    // (1.0/1440.0) keeps all errors below 0.001". Zero means exact match.
+    double jd_tolerance = 0.0;
+
+    // Engine-managed cache — do not modify directly; call invalidate() if
+    // observer parameters are changed after the first use.
+    double                 cached_jd       = 0.0;
+    IGeographicCoordinates cached_observer = {};
+    bool                   cache_valid     = false;
+#ifdef HAVE_ERFA
+    eraASTROM astrom{};
+    double    eo = 0.0;
+#endif
+
+    void invalidate() { cache_valid = false; }
+};
+
 /*
 * \brief This provides astrometric helper functions
 * based on the libnova library
@@ -83,6 +136,41 @@ typedef struct
 * \param J2000pos returns catalogue position
 */
 void ObservedToJ2000(IEquatorialCoordinates *observed, double jd, IEquatorialCoordinates *J2000pos);
+
+/**
+ * @brief J2000toGeocentric converts a J2000 catalog position to geocentric apparent coordinates.
+ * @param j2000 J2000 catalog position (typed)
+ * @param jd Julian Date (UTC)
+ * @param out Geocentric apparent (CIRS) coordinates
+ */
+void J2000toGeocentric(J2000Coordinates *j2000, double jd, GeocentricApparent *out);
+
+/**
+ * @brief GeocentricToJ2000 converts geocentric apparent coordinates back to J2000.
+ * @param apparent Geocentric apparent (CIRS) coordinates
+ * @param jd Julian Date (UTC)
+ * @param out J2000 catalog position
+ */
+void GeocentricToJ2000(GeocentricApparent *apparent, double jd, J2000Coordinates *out);
+
+/**
+ * @brief J2000toTopocentric converts a J2000 catalog position to topocentric apparent
+ * coordinates, applying geocentric parallax and diurnal aberration for the given observer.
+ * @param j2000 J2000 catalog position
+ * @param ctx Observer context (set observer fields; cache is managed automatically)
+ * @param jd Julian Date (UTC)
+ * @param out Topocentric apparent (CIRS) coordinates
+ */
+void J2000toTopocentric(J2000Coordinates *j2000, AstrometricContext &ctx, double jd, TopocentricApparent *out);
+
+/**
+ * @brief TopocentricToJ2000 converts topocentric apparent coordinates back to J2000.
+ * @param apparent Topocentric apparent (CIRS) coordinates
+ * @param ctx Observer context (same context used for the forward transform)
+ * @param jd Julian Date (UTC)
+ * @param out J2000 catalog position
+ */
+void TopocentricToJ2000(TopocentricApparent *apparent, AstrometricContext &ctx, double jd, J2000Coordinates *out);
 
 /**
 * \brief J2000toObserved converts a J2000 catalogue position to an observed position for the epoch jd
@@ -113,6 +201,15 @@ void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinat
 void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed);
 
 /**
+ * @brief GetPlanetTopocentric calculates topocentric planetary/lunar equatorial coordinates.
+ * @param np Body identifier: 1=Mercury, 2=Venus, 3=Moon, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus, 8=Neptune, else=Sun.
+ * @param jd Julian Date (UTC).
+ * @param ctx Observer context (observer location required; cache managed automatically).
+ * @param out Topocentric apparent coordinates (RA hours, Dec degrees).
+ */
+void GetPlanetTopocentric(int np, double jd, AstrometricContext &ctx, TopocentricApparent *out);
+
+/**
  * @brief HorizontalToEquatorial Calculate JNow/CIRS apparent equatorial coordinates from horizontal coordinates.
  * @param object Horizontal coordinates (azimuth 0=N/90=E, altitude degrees).
  * @param observer Observer location (longitude 0–360 eastward, latitude, elevation in meters).
@@ -122,6 +219,18 @@ void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed);
  */
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position);
+
+/**
+ * @brief Typed overloads of EquatorialToHorizontal.
+ *
+ * Accept geocentric or topocentric CIRS coordinates explicitly, preventing
+ * accidental use of raw J2000 coordinates. Both delegate to the same
+ * underlying frame rotation.
+ */
+void EquatorialToHorizontal(const GeocentricApparent *object, IGeographicCoordinates *observer, double JD,
+                            IHorizontalCoordinates *position);
+void EquatorialToHorizontal(const TopocentricApparent *object, IGeographicCoordinates *observer, double JD,
+                            IHorizontalCoordinates *position);
 
 /**
 * \brief ln_get_equ_nut applies or removes nutation in place for the epoch JD

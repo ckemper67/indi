@@ -11,6 +11,10 @@ class IPlanetaryEngine {
 public:
     virtual ~IPlanetaryEngine() = default;
     virtual void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) = 0;
+
+    virtual void GetPlanetTopocentric(int np, double jd,
+                                      INDI::AstrometricContext &ctx,
+                                      INDI::TopocentricApparent *out) = 0;
 };
 
 /**
@@ -20,12 +24,12 @@ class ICoordinateEngine {
 public:
     virtual ~ICoordinateEngine() = default;
 
-    virtual void J2000toObserved(INDI::IEquatorialCoordinates *j2000, 
-                                 double jd, 
+    virtual void J2000toObserved(INDI::IEquatorialCoordinates *j2000,
+                                 double jd,
                                  INDI::IEquatorialCoordinates *jnow) = 0;
 
-    virtual void ObservedToJ2000(INDI::IEquatorialCoordinates *jnow, 
-                                 double jd, 
+    virtual void ObservedToJ2000(INDI::IEquatorialCoordinates *jnow,
+                                 double jd,
                                  INDI::IEquatorialCoordinates *j2000) = 0;
 
     virtual void EquatorialToHorizontal(INDI::IEquatorialCoordinates *object,
@@ -37,6 +41,26 @@ public:
                                         INDI::IGeographicCoordinates *observer,
                                         double jd,
                                         INDI::IEquatorialCoordinates *position) = 0;
+
+    // Typed frame-safe variants (M5 topocentric promotion)
+
+    virtual void J2000toGeocentric(const INDI::J2000Coordinates *j2000,
+                                   double jd,
+                                   INDI::GeocentricApparent *out) = 0;
+
+    virtual void GeocentricToJ2000(const INDI::GeocentricApparent *apparent,
+                                   double jd,
+                                   INDI::J2000Coordinates *out) = 0;
+
+    virtual void J2000toTopocentric(const INDI::J2000Coordinates *j2000,
+                                    INDI::AstrometricContext &ctx,
+                                    double jd,
+                                    INDI::TopocentricApparent *out) = 0;
+
+    virtual void TopocentricToJ2000(const INDI::TopocentricApparent *apparent,
+                                    INDI::AstrometricContext &ctx,
+                                    double jd,
+                                    INDI::J2000Coordinates *out) = 0;
 };
 
 // Factory functions for Stellar Engines

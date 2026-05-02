@@ -256,6 +256,186 @@ TEST(EngineComparison, MultiEpochDeviation)
                      << "max delta=" << max_delta << "\"";
 }
 
+// Compares geocentric vs topocentric for stars, Moon, and Mars against
+// geocentric truth (IMCCE / JPL DE440) and topocentric truth (JPL DE440,
+// observer at Greenwich: 0.0°E, 51.4769°N, 45 m).
+//
+// Stars (px=0): topocentric differs from geocentric by diurnal aberration
+// (~0-0.3") — both are measured against geocentric IMCCE truth, so
+// topocentric will appear slightly worse against that benchmark.  That is
+// correct: the star golden data has no observer location, so geocentric is
+// the right comparison there.
+//
+// Planets/Moon: topocentric truth is observer-specific.  The table shows
+// that geocentric EPH carries the full parallax error vs a surface observer
+// (~38' for Moon, ~9" for Mars) while topocentric EPH recovers sub-arcsecond
+// accuracy against the topocentric JPL benchmark.
+TEST(EngineComparison, TopocentricComparison)
+{
+    // Observer: Greenwich (lon=0°E, lat=51.4769°N, elev=45 m)
+    INDI::AstrometricContext ctx;
+    ctx.observer = { 0.0, 51.4769, 45.0 };
+
+    double jd = 2459019.833333;
+
+    INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
+
+    // -----------------------------------------------------------------------
+    // Stars: geocentric vs topocentric vs IMCCE geocentric truth
+    // -----------------------------------------------------------------------
+    {
+        std::ifstream f(TEST_DATA_DIR "/star_golden.json");
+        ASSERT_TRUE(f.is_open()) << "Could not open star_golden.json";
+        nlohmann::json golden = nlohmann::json::parse(f);
+
+        struct StarRow {
+            std::string name;
+            double err_geo, err_topo, delta_gt;
+        };
+        std::vector<StarRow> rows;
+
+        for (auto &entry : golden)
+        {
+            std::string name = entry["name"];
+            double jd_star   = entry["jd"];
+
+            INDI::J2000Coordinates input;
+            input.rightascension = static_cast<double>(entry["ra_j2obs"]) / 15.0;
+            input.declination    = entry["dec_j2obs"];
+
+            double ra_truth  = static_cast<double>(entry["ra"])  / 15.0;
+            double dec_truth = entry["dec"];
+            double cos_dec   = std::cos(dec_truth * M_PI / 180.0);
+
+            auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+                double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
+                double dDec = (pos.declination    - dec_truth) * 3600.0;
+                return std::hypot(dRA, dDec);
+            };
+
+            INDI::GeocentricApparent  geo;
+            INDI::TopocentricApparent topo;
+
+            ctx.invalidate();
+            INDI::J2000toGeocentric(&input, jd_star, &geo);
+            INDI::J2000toTopocentric(&input, ctx, jd_star, &topo);
+
+            double err_geo  = calc_error(geo);
+            double err_topo = calc_error(topo);
+            double delta_gt = std::hypot(
+                (geo.rightascension - topo.rightascension) * 15.0 * 3600.0 * cos_dec,
+                (geo.declination    - topo.declination)    * 3600.0);
+
+            rows.push_back({name, err_geo, err_topo, delta_gt});
+        }
+
+        const std::string SEP = "-----------------------------------------------------------------------";
+        GTEST_LOG_(INFO) << "";
+        GTEST_LOG_(INFO) << "Star accuracy vs IMCCE geocentric truth (arcsec) — observer: Greenwich";
+        GTEST_LOG_(INFO) << "  geo-topo delta = diurnal aberration (~0–0.3\"); truth is geocentric";
+        GTEST_LOG_(INFO) << SEP;
+        {
+            std::ostringstream hdr;
+            hdr << std::left  << std::setw(14) << "Star"
+                << std::right << std::setw(14) << "geo vs truth"
+                              << std::setw(16) << "topo vs truth"
+                              << std::setw(16) << "geo-topo delta";
+            GTEST_LOG_(INFO) << hdr.str();
+        }
+        GTEST_LOG_(INFO) << SEP;
+        for (auto &r : rows)
+        {
+            std::ostringstream line;
+            line << std::left  << std::setw(14) << r.name
+                 << std::right << std::fixed << std::setprecision(4)
+                 << std::setw(14) << r.err_geo
+                 << std::setw(16) << r.err_topo
+                 << std::setw(16) << r.delta_gt;
+            GTEST_LOG_(INFO) << line.str();
+        }
+        GTEST_LOG_(INFO) << SEP;
+    }
+
+    // -----------------------------------------------------------------------
+    // Moon and Mars: geocentric vs topocentric vs both truth benchmarks
+    //
+    // Geocentric truth (JPL DE440 geocentric apparent):
+    //   Moon: RA=64.16991°  Dec=+19.17745°
+    //   Mars: RA=356.16466°  Dec=-4.75544°
+    //
+    // Topocentric truth (JPL DE440, observer=Greenwich):
+    //   Moon: RA=64.53351°  Dec=+18.64394°
+    //   Mars: RA=356.16380°  Dec=-4.75770°
+    // -----------------------------------------------------------------------
+    struct PlanetCase {
+        const char *name;
+        int   np;
+        double geo_ra_truth,  geo_dec_truth;   // JPL geocentric apparent (deg)
+        double topo_ra_truth, topo_dec_truth;  // JPL topocentric apparent, Greenwich (deg)
+    };
+    const PlanetCase cases[] = {
+        { "Moon", 3,  64.16991,  19.17745,  64.53351,  18.64394 },
+        { "Mars", 4, 356.16466,  -4.75544, 356.16380,  -4.75770 },
+    };
+
+    auto sep2 = std::string(86, '-');
+    GTEST_LOG_(INFO) << "";
+    GTEST_LOG_(INFO) << "Planet accuracy (arcsec) — observer: Greenwich  JD=" << jd;
+    GTEST_LOG_(INFO) << sep2;
+    {
+        std::ostringstream hdr;
+        hdr << std::left  << std::setw(6) << "Body"
+            << std::right << std::setw(20) << "geo vs geo-truth"
+                          << std::setw(22) << "geo vs topo-truth"
+                          << std::setw(22) << "topo vs geo-truth"
+                          << std::setw(18) << "topo vs topo-truth";
+        GTEST_LOG_(INFO) << hdr.str();
+    }
+    GTEST_LOG_(INFO) << sep2;
+
+    for (auto &c : cases)
+    {
+        INDI::IEquatorialCoordinates pos_geo;
+        INDI::TopocentricApparent    pos_topo;
+
+        ctx.invalidate();
+        INDI::GetPlanetObserved(c.np, jd, &pos_geo);
+        INDI::GetPlanetTopocentric(c.np, jd, ctx, &pos_topo);
+
+        auto err = [](double ra_deg, double dec_deg,
+                      double ra_truth, double dec_truth) {
+            double cos_dec = std::cos(dec_truth * M_PI / 180.0);
+            double dRA  = (ra_deg  - ra_truth) * 3600.0 * cos_dec;
+            double dDec = (dec_deg - dec_truth) * 3600.0;
+            return std::hypot(dRA, dDec);
+        };
+
+        double ra_geo_deg  = pos_geo.rightascension  * 15.0;
+        double ra_topo_deg = pos_topo.rightascension * 15.0;
+
+        double geo_vs_geo   = err(ra_geo_deg,  pos_geo.declination,  c.geo_ra_truth,  c.geo_dec_truth);
+        double geo_vs_topo  = err(ra_geo_deg,  pos_geo.declination,  c.topo_ra_truth, c.topo_dec_truth);
+        double topo_vs_geo  = err(ra_topo_deg, pos_topo.declination, c.geo_ra_truth,  c.geo_dec_truth);
+        double topo_vs_topo = err(ra_topo_deg, pos_topo.declination, c.topo_ra_truth, c.topo_dec_truth);
+
+        std::ostringstream line;
+        line << std::left  << std::setw(6) << c.name
+             << std::right << std::fixed << std::setprecision(3)
+             << std::setw(20) << geo_vs_geo
+             << std::setw(22) << geo_vs_topo
+             << std::setw(22) << topo_vs_geo
+             << std::setw(18) << topo_vs_topo;
+        GTEST_LOG_(INFO) << line.str();
+
+        // Geocentric EPH should match JPL geocentric truth
+        EXPECT_LT(geo_vs_geo,   1.0) << c.name << " geocentric vs geocentric truth";
+        // Topocentric EPH should match JPL topocentric truth
+        EXPECT_LT(topo_vs_topo, 1.0) << c.name << " topocentric vs topocentric truth";
+    }
+    GTEST_LOG_(INFO) << sep2;
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

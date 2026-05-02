@@ -61,6 +61,26 @@ void J2000toObserved(IEquatorialCoordinates *J2000pos, double jd, IEquatorialCoo
     getStellarEngine().J2000toObserved(J2000pos, jd, observed);
 }
 
+void J2000toGeocentric(J2000Coordinates *j2000, double jd, GeocentricApparent *out)
+{
+    getStellarEngine().J2000toGeocentric(j2000, jd, out);
+}
+
+void GeocentricToJ2000(GeocentricApparent *apparent, double jd, J2000Coordinates *out)
+{
+    getStellarEngine().GeocentricToJ2000(apparent, jd, out);
+}
+
+void J2000toTopocentric(J2000Coordinates *j2000, AstrometricContext &ctx, double jd, TopocentricApparent *out)
+{
+    getStellarEngine().J2000toTopocentric(j2000, ctx, jd, out);
+}
+
+void TopocentricToJ2000(TopocentricApparent *apparent, AstrometricContext &ctx, double jd, J2000Coordinates *out)
+{
+    getStellarEngine().TopocentricToJ2000(apparent, ctx, jd, out);
+}
+
 void EquatorialToHorizontal(IEquatorialCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IHorizontalCoordinates *position)
 {
@@ -72,10 +92,27 @@ void GetPlanetObserved(int np, double jd, IEquatorialCoordinates *observed)
     getPlanetaryEngine().GetPlanetObserved(np, jd, observed);
 }
 
+void GetPlanetTopocentric(int np, double jd, AstrometricContext &ctx, TopocentricApparent *out)
+{
+    getPlanetaryEngine().GetPlanetTopocentric(np, jd, ctx, out);
+}
+
 void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinates *observer, double JD,
                             IEquatorialCoordinates *position)
 {
     getStellarEngine().HorizontalToEquatorial(object, observer, JD, position);
+}
+
+void EquatorialToHorizontal(const GeocentricApparent *object, IGeographicCoordinates *observer, double JD,
+                            IHorizontalCoordinates *position)
+{
+    getStellarEngine().EquatorialToHorizontal(const_cast<GeocentricApparent*>(object), observer, JD, position);
+}
+
+void EquatorialToHorizontal(const TopocentricApparent *object, IGeographicCoordinates *observer, double JD,
+                            IHorizontalCoordinates *position)
+{
+    getStellarEngine().EquatorialToHorizontal(const_cast<TopocentricApparent*>(object), observer, JD, position);
 }
 
 }
