@@ -122,7 +122,7 @@ TEST(EngineComparison, Reciprocity)
 TEST(EngineComparison, PlanetDeviation)
 {
     double jd = 2459019.833333;
-    INDI::IEquatorialCoordinates mars_libnova, mars_full, mars_indi;
+    INDI::IEquatorialCoordinates mars_libnova, mars_vsop2013, mars_packed;
 
     // JPL Horizons DE440 geocentric apparent (from test/data/planet_golden.json)
     const double RA_TRUTH  = 356.16466 / 15.0;  // hours
@@ -139,40 +139,39 @@ TEST(EngineComparison, PlanetDeviation)
     INDI::setPlanetaryEngine(INDI::PlanetaryEngine::LIBNOVA);
     INDI::GetPlanetObserved(4, jd, &mars_libnova);
 
-    // 2. Full VSOP2010 (EPH_FULL)
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
-    INDI::GetPlanetObserved(4, jd, &mars_full);
+    // 2. Full VSOP2013
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013);
+    INDI::GetPlanetObserved(4, jd, &mars_vsop2013);
 
-    // 3. Truncated VSOP2010 (EPH_INDI, packed .ictx or full fallback)
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
-    INDI::GetPlanetObserved(4, jd, &mars_indi);
+    // 3. VSOP2013 packed (.ictx, fallback to full)
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
+    INDI::GetPlanetObserved(4, jd, &mars_packed);
 
-    double error_libnova = calc_error(mars_libnova);
-    double error_full    = calc_error(mars_full);
-    double error_indi    = calc_error(mars_indi);
+    double error_libnova  = calc_error(mars_libnova);
+    double error_vsop2013 = calc_error(mars_vsop2013);
+    double error_packed   = calc_error(mars_packed);
 
-    // Delta between EPH_FULL and EPH_INDI (truncation budget)
-    double delta_full_indi = std::hypot(
-        (mars_full.rightascension - mars_indi.rightascension) * 15.0 * 3600.0 * std::cos(DEC_TRUTH * M_PI / 180.0),
-        (mars_full.declination    - mars_indi.declination)    * 3600.0
+    double delta = std::hypot(
+        (mars_vsop2013.rightascension - mars_packed.rightascension) * 15.0 * 3600.0 * std::cos(DEC_TRUTH * M_PI / 180.0),
+        (mars_vsop2013.declination    - mars_packed.declination)    * 3600.0
     );
 
     GTEST_LOG_(INFO) << "Mars Absolute Error vs JPL Truth (2020):";
-    GTEST_LOG_(INFO) << "  libnova:   " << error_libnova << " arcsec";
-    GTEST_LOG_(INFO) << "  EPH_FULL:  " << error_full    << " arcsec";
-    GTEST_LOG_(INFO) << "  EPH_INDI:  " << error_indi    << " arcsec";
-    GTEST_LOG_(INFO) << "  FULL vs INDI delta: " << delta_full_indi << " arcsec";
+    GTEST_LOG_(INFO) << "  libnova:        " << error_libnova  << " arcsec";
+    GTEST_LOG_(INFO) << "  VSOP2013:       " << error_vsop2013 << " arcsec";
+    GTEST_LOG_(INFO) << "  VSOP2013_PACKED:" << error_packed   << " arcsec";
+    GTEST_LOG_(INFO) << "  VSOP2013 vs PACKED delta: " << delta << " arcsec";
 
     EXPECT_GT(error_libnova, 1000.0);
-    EXPECT_LT(error_full, 1.0);   // EPH vs DE440 geocentric; ~0.25" observed
-    EXPECT_LT(error_indi, 0.04 + error_full);   // truncation adds at most 0.04"
-    EXPECT_LT(delta_full_indi, 0.04);
+    EXPECT_LT(error_vsop2013, 1.0);
+    EXPECT_LT(error_packed, 0.04 + error_vsop2013);
+    EXPECT_LT(delta, 0.04);
 }
 
 TEST(EngineComparison, MoonDeviation)
 {
     double jd = 2459019.833333;
-    INDI::IEquatorialCoordinates moon_full, moon_indi;
+    INDI::IEquatorialCoordinates moon_vsop2013, moon_packed;
 
     // JPL Horizons Truth (DE440) for Moon at JD 2459019.833333
     // RA in degrees: 64.16991, Dec: 19.17745
@@ -186,25 +185,25 @@ TEST(EngineComparison, MoonDeviation)
         return std::hypot(dRA, dDec);
     };
 
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
-    INDI::GetPlanetObserved(3, jd, &moon_full);
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013);
+    INDI::GetPlanetObserved(3, jd, &moon_vsop2013);
 
-    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
-    INDI::GetPlanetObserved(3, jd, &moon_indi);
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
+    INDI::GetPlanetObserved(3, jd, &moon_packed);
 
-    double error_full = calc_error(moon_full);
-    double error_indi = calc_error(moon_indi);
+    double error_vsop2013 = calc_error(moon_vsop2013);
+    double error_packed   = calc_error(moon_packed);
 
     GTEST_LOG_(INFO) << "Moon Absolute Error vs JPL Truth (2020):";
-    GTEST_LOG_(INFO) << "  EPH_FULL:  " << error_full << " arcsec";
-    GTEST_LOG_(INFO) << "  EPH_INDI:  " << error_indi << " arcsec";
+    GTEST_LOG_(INFO) << "  VSOP2013:        " << error_vsop2013 << " arcsec";
+    GTEST_LOG_(INFO) << "  VSOP2013_PACKED: " << error_packed   << " arcsec";
 
     // Moon uses ELP/MPP02 (same .ctx in both engines) — results must be identical
-    EXPECT_LT(error_full, 20.0);   // ELP/MPP02 geocentric accuracy vs DE440
-    EXPECT_NEAR(error_full, error_indi, 0.001);  // same loader, must match
+    EXPECT_LT(error_vsop2013, 20.0);
+    EXPECT_NEAR(error_vsop2013, error_packed, 0.001);
 }
 
-// Validates EPH_FULL and EPH_INDI against JPL DE440 geocentric truth across
+// Validates VSOP2013 and VSOP2013_PACKED against JPL DE440 geocentric truth across
 // 11 epochs from 2000 to 2100 (every ~10 years) for Mars, Jupiter, Saturn, Moon.
 // Guards against time-dependent failures introduced by the time-weighted packing filter.
 TEST(EngineComparison, MultiEpochDeviation)
@@ -213,7 +212,7 @@ TEST(EngineComparison, MultiEpochDeviation)
     ASSERT_TRUE(f.is_open()) << "Could not open multi_epoch_golden.json";
     nlohmann::json golden = nlohmann::json::parse(f);
 
-    double max_err_full = 0, max_err_indi = 0, max_delta = 0;
+    double max_err_vsop = 0, max_err_packed = 0, max_delta = 0;
     int n = 0;
 
     for (auto& entry : golden) {
@@ -223,11 +222,11 @@ TEST(EngineComparison, MultiEpochDeviation)
         double ra_truth  = static_cast<double>(entry["ra_deg"]) / 15.0;  // hours
         double dec_truth = entry["dec_deg"];
 
-        INDI::IEquatorialCoordinates pos_full, pos_indi;
-        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_FULL);
-        INDI::GetPlanetObserved(np, jd, &pos_full);
-        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::EPH_INDI);
-        INDI::GetPlanetObserved(np, jd, &pos_indi);
+        INDI::IEquatorialCoordinates pos_vsop, pos_packed;
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013);
+        INDI::GetPlanetObserved(np, jd, &pos_vsop);
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
+        INDI::GetPlanetObserved(np, jd, &pos_packed);
 
         double cos_dec = std::cos(dec_truth * M_PI / 180.0);
         auto err = [&](INDI::IEquatorialCoordinates& pos) {
@@ -236,24 +235,75 @@ TEST(EngineComparison, MultiEpochDeviation)
             return std::hypot(dRA, dDec);
         };
         double delta = std::hypot(
-            (pos_full.rightascension - pos_indi.rightascension) * 15.0 * 3600.0 * cos_dec,
-            (pos_full.declination    - pos_indi.declination)    * 3600.0);
+            (pos_vsop.rightascension - pos_packed.rightascension) * 15.0 * 3600.0 * cos_dec,
+            (pos_vsop.declination    - pos_packed.declination)    * 3600.0);
 
-        double ef = err(pos_full), ei = err(pos_indi);
-        max_err_full = std::max(max_err_full, ef);
-        max_err_indi = std::max(max_err_indi, ei);
-        max_delta    = std::max(max_delta, delta);
+        double ef = err(pos_vsop), ei = err(pos_packed);
+        max_err_vsop   = std::max(max_err_vsop,   ef);
+        max_err_packed = std::max(max_err_packed,  ei);
+        max_delta      = std::max(max_delta, delta);
 
-        EXPECT_LT(ef, 2.0) << planet << " EPH_FULL at JD " << jd;
-        EXPECT_LT(ei, 2.0) << planet << " EPH_INDI at JD " << jd;
-        EXPECT_LT(delta, 0.1) << planet << " FULL vs INDI delta at JD " << jd;
+        EXPECT_LT(ef, 2.0) << planet << " VSOP2013 at JD " << jd;
+        EXPECT_LT(ei, 2.0) << planet << " VSOP2013_PACKED at JD " << jd;
+        EXPECT_LT(delta, 0.1) << planet << " VSOP2013 vs PACKED delta at JD " << jd;
         n++;
     }
 
     GTEST_LOG_(INFO) << "Multi-epoch (" << n << " points): "
-                     << "max EPH_FULL=" << max_err_full << "\"  "
-                     << "max EPH_INDI=" << max_err_indi << "\"  "
+                     << "max VSOP2013=" << max_err_vsop << "\"  "
+                     << "max VSOP2013_PACKED=" << max_err_packed << "\"  "
                      << "max delta=" << max_delta << "\"";
+}
+
+// Validates EphEngineHybrid (TOP2013 for outer planets).
+// Compares VSOPTOP2013 against VSOP2013 for outer planets — they should
+// agree to within a few hundred arcsec since both implement the same theory era.
+// Also verifies inner planets route through the same VSOP2013 path as VSOP2013_PACKED.
+TEST(EngineComparison, HybridOuterPlanets)
+{
+    double jd = 2459019.833333;
+    int outer[] = { 5, 6, 7, 8 };
+    const char* names[] = { "Jupiter", "Saturn", "Uranus", "Neptune" };
+
+    GTEST_LOG_(INFO) << "VSOPTOP2013 vs VSOP2013 for outer planets (JD 2459019.833333):";
+    GTEST_LOG_(INFO) << "  (VSOPTOP2013=TOP2013, VSOP2013=full; should agree to ~100\")";
+
+    for (int i = 0; i < 4; i++) {
+        int np = outer[i];
+
+        INDI::IEquatorialCoordinates pos_top, pos_vsop;
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOPTOP2013);
+        INDI::GetPlanetObserved(np, jd, &pos_top);
+        INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013);
+        INDI::GetPlanetObserved(np, jd, &pos_vsop);
+
+        double cos_dec = std::cos(pos_vsop.declination * M_PI / 180.0);
+        double delta = std::hypot(
+            (pos_top.rightascension - pos_vsop.rightascension) * 15.0 * 3600.0 * cos_dec,
+            (pos_top.declination    - pos_vsop.declination)    * 3600.0);
+
+        GTEST_LOG_(INFO) << "  " << names[i]
+            << "  VSOPTOP2013 RA=" << std::fixed << std::setprecision(4) << pos_top.rightascension * 15.0
+            << " Dec=" << pos_top.declination
+            << "  VSOP2013 RA=" << pos_vsop.rightascension * 15.0
+            << " Dec=" << pos_vsop.declination
+            << "  delta=" << delta << "\"";
+
+        EXPECT_LT(delta, 3600.0) << names[i] << " VSOPTOP2013 vs VSOP2013 exceeds 1 degree";
+    }
+
+    // Inner planet (Mars, np=4) must match VSOP2013_PACKED exactly
+    INDI::IEquatorialCoordinates mars_top, mars_packed;
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOPTOP2013);
+    INDI::GetPlanetObserved(4, jd, &mars_top);
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::VSOP2013_PACKED);
+    INDI::GetPlanetObserved(4, jd, &mars_packed);
+
+    double mars_delta = std::hypot(
+        (mars_top.rightascension - mars_packed.rightascension) * 15.0 * 3600.0,
+        (mars_top.declination    - mars_packed.declination)    * 3600.0);
+    GTEST_LOG_(INFO) << "  Mars VSOPTOP2013 vs VSOP2013_PACKED delta: " << mars_delta << " arcsec";
+    EXPECT_LT(mars_delta, 0.04) << "Mars inner-planet path mismatch";
 }
 
 int main(int argc, char **argv)

@@ -48,5 +48,6 @@ std::unique_ptr<ICoordinateEngine> createErfaEngine2000B();
 std::unique_ptr<IPlanetaryEngine> createLibnovaPlanetaryEngine();
 std::unique_ptr<IPlanetaryEngine> createEphEngineFull();
 std::unique_ptr<IPlanetaryEngine> createEphEngineINDI();
+std::unique_ptr<IPlanetaryEngine> createEphEngineHybrid();
 
 #endif // COORDINATE_ENGINE_H

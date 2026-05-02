@@ -43,9 +43,10 @@ IPlanetaryEngine& getPlanetaryEngine() {
     std::lock_guard<std::mutex> lock(s_engineMutex);
     if (!planetaryEngine) {
         switch(currentPlanetaryType) {
-            case PlanetaryEngine::EPH_FULL: planetaryEngine = createEphEngineFull(); break;
-            case PlanetaryEngine::EPH_INDI: planetaryEngine = createEphEngineINDI(); break;
-            default:                        planetaryEngine = createLibnovaPlanetaryEngine(); break;
+            case PlanetaryEngine::VSOP2013:        planetaryEngine = createEphEngineFull();    break;
+            case PlanetaryEngine::VSOP2013_PACKED: planetaryEngine = createEphEngineINDI();    break;
+            case PlanetaryEngine::VSOPTOP2013:     planetaryEngine = createEphEngineHybrid();  break;
+            default:                          planetaryEngine = createLibnovaPlanetaryEngine(); break;
         }
     }
     return *planetaryEngine;

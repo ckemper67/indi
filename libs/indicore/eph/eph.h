@@ -64,6 +64,20 @@ typedef struct {
    int nmpb[3][3], nper[3][4][3];
 } ephMOONctx;
 
+/* Context for TOP2013 outer-planet computations */
+#define MAXTERM_TOP 100000
+#define MAXTIME_TOP 12
+typedef struct {
+   short  init, ibody;
+   double receq[3][3], rgm;
+   double dmu;                      /* (freq_Jup - freq_Sat)/880  rad/mill */
+   double freq;                     /* mean longitude rate for this body   */
+   short  limit[MAXTIME_TOP+1][6];
+   int    m[MAXTERM_TOP];           /* integer multipliers */
+   double c[MAXTERM_TOP];           /* cosine coefficients */
+   double s[MAXTERM_TOP];           /* sine coefficients   */
+} ephTOPctx;
+
 /* Function prototypes */
 FILE* ephBopr ( char*, char*, int* );
 int ephEarth ( double, ephMOONctx*, ephPLANctx*, double[2][3] );
@@ -82,6 +96,13 @@ int ephRdplanq ( double[2][3], double[2][3], ephPLANctx*,
                  double, double, int, double, double, double,
                  double*, double*,
                  double*, double*, double*, double* );
+int ephTopc    ( int, char*, ephTOPctx* );
+int ephTopci   ( int, char*, ephTOPctx* );
+int ephTopi    ( char*, int, ephTOPctx* );
+int ephTopPlanet ( int, ephTOPctx*, double, double[2][3] );
+int ephRdtop   ( double[2][3], double[2][3], ephTOPctx*,
+                 double, double, int, double, double, double,
+                 double*, double*, double*, double*, double*, double* );
 
 #ifdef __cplusplus
 }

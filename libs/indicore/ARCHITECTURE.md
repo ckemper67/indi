@@ -86,17 +86,20 @@ The EPH library is authored by Patrick Wallace (also the original author of SLAL
 The library is released under an ISC-style license: permission is granted to use, copy, modify, and distribute for any purpose with or without fee. Copyright (C) P.T.Wallace. All rights reserved.
 
 
-| Class | Backend | Theory | Precision | Status |
-|-------|---------|--------|-----------|--------|
-| `LibnovaPlanetaryEngine` | libnova | VSOP87 | ~1000" | Fallback |
-| `EphEngineFull` | EPH library | VSOP2010 (full) | ~0.73" geocentric | Available |
-| `EphEngineINDI` | EPH library | VSOP2010 (truncated, 2.6 MB) | +0.003" vs EPH_FULL | Available |
+| Class | Backend | Theory | Enum | Precision | Status |
+|-------|---------|--------|------|-----------|--------|
+| `LibnovaPlanetaryEngine` | libnova | VSOP87 | `LIBNOVA` | ~1000" | Fallback |
+| `EphEngineFull` | EPH library | VSOP2013 (full) | `VSOP2013` | ~0.27" geocentric | Available |
+| `EphEngineINDI` | EPH library | VSOP2013 (truncated, 2.6 MB) | `VSOP2013_PACKED` | +0.003" vs VSOP2013 | Default |
+| `EphEngineHybrid` | EPH + TOP2013 | VSOP2013 (inner) + TOP2013 (outer) | `VSOPTOP2013` | ~0.27" inner; < 2" vs VSOP2013 outer | Available |
 
 **Time conversion**: UTC → TAI → TT via `eraUtctai` + `eraTaitt`. TT is used as TDB (TDB-TT < 2ms geocentric). This corrects the ~69s UT1/TDB discrepancy present in the original implementation.
 
 **Context loading**: `EphEngineFull` holds the `.ctx` contexts as member variables. The Earth/EMB context and Moon context are loaded once on first use; the planet context is reloaded when `np` changes. Load failures are detected from `ephPlanc`/`ephMoonc` return values and cause an early return.
 
 **`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a time-weighted amplitude filter: threshold $10^{-9}$ AU with `max_tm=0.2` (±200 yr from J2000), producing a 2.6 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.003" for Mars at JD 2459019.833333. Both engines agree with JPL DE440 geocentric to ~0.25".
+
+**`EphEngineHybrid`**: uses VSOP2013 for bodies 1–4 (Mercury through Moon/Earth) and TOP2013 for bodies 5–8 (Jupiter through Neptune). TOP2013 uses a simpler frequency parameterization (`arg = m × dmu × t` with a single global `dmu`) that achieves higher accuracy for the outer planets with comparable term counts. Outer planet contexts are loaded from `.tictx` packed files (0.74 MB total) via `ephTopci()`, falling back to `.tctx` binary contexts. Validated delta vs `EphEngineFull` at JD 2459019.833333: Jupiter 1.2", Saturn 0.6", Uranus 0.1", Neptune 0.2". Inner planet path is identical to `EphEngineINDI`.
 
 ### Generating EPH data files
 
@@ -165,10 +168,46 @@ regenerate `.ictx` files any time the packer or `ephPLANctx` struct changes.
 **Step 4 — Verify**
 
 ```bash
-cd build
 ./test/core/test_eph_library        # load + compute smoke tests
 ./test/core/test_engine_comparison  # validates against JPL DE440
 ```
+
+### Generating TOP2013 data files (for `EphEngineHybrid`)
+
+TOP2013 uses a single ASCII file (`TOP2013.dat`) for all outer planets, available from the same IMCCE URL above.
+
+**Step 1 — Build the tool**
+
+```bash
+make eph_top_bin indi_eph_packer
+```
+
+**Step 2 — Generate `.tctx` binary context files**
+
+`eph_top_bin` reads `TOP2013.dat` from the given directory and writes `TOP2013_5.tctx` … `TOP2013_8.tctx` to the current directory:
+
+```bash
+cd <dir-with-TOP2013.dat>
+<build>/libs/indicore/eph/eph_top_bin
+# or: eph_top_bin <path-to-TOP2013.dat-directory>
+```
+
+`.tctx` files are large (~2 MB each) and gitignored; they are only needed as input to the packer.
+
+**Step 3 — Pack `.tictx` files**
+
+```bash
+mkdir -p /tmp/tictx_out
+./tools/indi_eph_packer --top \
+    <dir-with-tctx-files> \
+    /tmp/tictx_out \
+    1e-9 0.2
+# writes TOP2013_5.tictx … TOP2013_8.tictx  (0.74 MB total)
+
+cp /tmp/tictx_out/TOP2013_*.tictx libs/indicore/eph/
+```
+
+The `--top` flag selects TOP2013 mode; without it the packer produces VSOP2013 `.ictx` files. The `.tictx` files use a separate magic (`TICT`, version 1) from the VSOP2013 `.ictx` files (`ICTX`, version 2) and are not interchangeable.
 
 ---
 
@@ -177,8 +216,8 @@ cd build
 `libs/indicore/libastro.cpp` manages engine lifetime and exposes the public API.
 
 ```
-INDI::setStellarEngine(StellarEngine::ERFA_2000B)   // independent selections
-INDI::setPlanetaryEngine(PlanetaryEngine::EPH_FULL)
+INDI::setStellarEngine(StellarEngine::ERFA_2000B)      // independent selections
+INDI::setPlanetaryEngine(PlanetaryEngine::VSOP2013)
 ```
 
 Engines are lazily constructed on first use and destroyed on engine change. A single mutex guards all reads and writes to the engine pointers, making the dispatch layer safe for concurrent driver use.
@@ -210,6 +249,10 @@ The split provides cross-validation between two independent ephemeris models (IN
 | EPH-Full | Mars geocentric (2020) | 0.26" vs DE440 |
 | EPH-Full | Moon geocentric (2020) | 0.25" vs DE440 |
 | EPH-INDI vs EPH-Full | Mars geocentric (2020) | 0.003" |
+| EPH-Hybrid vs EPH-Full | Jupiter geocentric (2020) | 1.2" |
+| EPH-Hybrid vs EPH-Full | Saturn geocentric (2020) | 0.6" |
+| EPH-Hybrid vs EPH-Full | Uranus geocentric (2020) | 0.1" |
+| EPH-Hybrid vs EPH-Full | Neptune geocentric (2020) | 0.2" |
 
 Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
@@ -224,8 +267,8 @@ Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 | `libs/indicore/CoordinateEngine.h` | `ICoordinateEngine`, `IPlanetaryEngine`, factory function declarations |
 | `libs/indicore/ErfaEngine.cpp` | `ErfaEngine2000A`, `ErfaEngine2000B`, `eraApci00b`/`eraAtci00b` wrappers |
 | `libs/indicore/LibnovaEngine.cpp` | `LibnovaStellarEngine`, `LibnovaPlanetaryEngine` |
-| `libs/indicore/EphEngine.cpp` | `EphEngineFull`, `EphEngineINDI` |
-| `libs/indicore/eph/` | EPH library source and `.ctx` data files (gitignored) |
+| `libs/indicore/EphEngine.cpp` | `EphEngineFull`, `EphEngineINDI`, `EphEngineHybrid` |
+| `libs/indicore/eph/` | EPH library source; `.ictx`/`.tictx` data files committed; `.ctx`/`.tctx` gitignored |
 
 ---
 

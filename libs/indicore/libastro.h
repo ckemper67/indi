@@ -143,9 +143,10 @@ enum class StellarEngine {
 };
 
 enum class PlanetaryEngine {
-    LIBNOVA,     // VSOP87
-    EPH_FULL,    // VSOP2010 Full (140MB)
-    EPH_INDI     // VSOP2010 Truncated (~12MB)
+    LIBNOVA,          // VSOP87
+    VSOP2013,         // VSOP2013 full binary contexts
+    VSOP2013_PACKED,  // VSOP2013 packed/truncated (~2.6 MB)
+    VSOPTOP2013       // VSOP2013 (inner) + TOP2013 (outer: Jupiter-Neptune)
 };
 
 void setStellarEngine(StellarEngine engine);

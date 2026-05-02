@@ -10,6 +10,11 @@ set(eph_SOURCES
     plani.c
     rdplan.c
     rdplanq.c
+    topc.c
+    topc_indi.c
+    toplanet.c
+    topi.c
+    rdtop.c
 )
 
 add_library(eph STATIC ${eph_SOURCES})
@@ -28,3 +33,12 @@ target_include_directories(eph PRIVATE
 add_executable(eph_plan_bin plan_bin.c)
 target_include_directories(eph_plan_bin PRIVATE . ${ERFA_INCLUDE_DIRS})
 target_link_libraries(eph_plan_bin eph ${M_LIB})
+
+# ########## eph_top_bin ##############
+# Offline tool: reads TOP2013.dat ASCII file, writes TOP2013_#.tctx binary
+# contexts for bodies 5-8 (Jupiter-Neptune).
+# Run manually after obtaining TOP2013.dat:
+#   cd <dir-with-TOP2013.dat> && <build>/libs/indicore/eph/eph_top_bin
+add_executable(eph_top_bin top_bin.c)
+target_include_directories(eph_top_bin PRIVATE . ${ERFA_INCLUDE_DIRS})
+target_link_libraries(eph_top_bin eph ${M_LIB})
