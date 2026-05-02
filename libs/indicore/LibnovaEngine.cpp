@@ -14,6 +14,7 @@
 #include <libnova/precession.h>
 #include <libnova/nutation.h>
 #include <libnova/aberration.h>
+#include <libnova/parallax.h>
 #include <cmath>
 #include <memory>
 
@@ -124,8 +125,51 @@ class LibnovaPlanetaryEngine : public IPlanetaryEngine {
 public:
     void GetPlanetTopocentric(int np, double jd, INDI::AstrometricContext &ctx,
                               INDI::TopocentricApparent *out) override {
-        INDI_UNUSED(ctx);
-        GetPlanetObserved(np, jd, out);
+        // Get geocentric apparent position
+        struct ln_equ_posn geo;
+        switch (np) {
+            case 1: ln_get_mercury_equ_coords(jd, &geo); break;
+            case 2: ln_get_venus_equ_coords  (jd, &geo); break;
+            case 3: ln_get_lunar_equ_coords  (jd, &geo); break;
+            case 4: ln_get_mars_equ_coords   (jd, &geo); break;
+            case 5: ln_get_jupiter_equ_coords(jd, &geo); break;
+            case 6: ln_get_saturn_equ_coords (jd, &geo); break;
+            case 7: ln_get_uranus_equ_coords (jd, &geo); break;
+            case 8: ln_get_neptune_equ_coords(jd, &geo); break;
+            default: ln_get_solar_equ_coords (jd, &geo); break;
+        }
+
+        // Earth-body distance in AU (Moon function returns km)
+        static constexpr double KM_PER_AU = 149597870.7;
+        double dist_au;
+        switch (np) {
+            case 1: dist_au = ln_get_mercury_earth_dist(jd); break;
+            case 2: dist_au = ln_get_venus_earth_dist  (jd); break;
+            case 3: dist_au = ln_get_lunar_earth_dist  (jd) / KM_PER_AU; break;
+            case 4: dist_au = ln_get_mars_earth_dist   (jd); break;
+            case 5: dist_au = ln_get_jupiter_earth_dist(jd); break;
+            case 6: dist_au = ln_get_saturn_earth_dist (jd); break;
+            case 7: dist_au = ln_get_uranus_earth_dist (jd); break;
+            case 8: dist_au = ln_get_neptune_earth_dist(jd); break;
+            default: {
+                struct ln_rect_posn sr;
+                ln_get_solar_geo_coords(jd, &sr);
+                dist_au = std::sqrt(sr.X*sr.X + sr.Y*sr.Y + sr.Z*sr.Z);
+                break;
+            }
+        }
+
+        // libnova expects longitude in [-180, +180] E
+        double lon_ln = ctx.observer.longitude > 180.0
+                        ? ctx.observer.longitude - 360.0
+                        : ctx.observer.longitude;
+        struct ln_lnlat_posn observer = { lon_ln, ctx.observer.latitude };
+
+        struct ln_equ_posn parallax;
+        ln_get_parallax(&geo, dist_au, &observer, ctx.observer.elevation, jd, &parallax);
+
+        out->rightascension = (geo.ra + parallax.ra) / 15.0;
+        out->declination    =  geo.dec + parallax.dec;
     }
 
     void GetPlanetObserved(int np, double jd, INDI::IEquatorialCoordinates *observed) override {

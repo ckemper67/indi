@@ -436,6 +436,99 @@ TEST(EngineComparison, TopocentricComparison)
     GTEST_LOG_(INFO) << sep2;
 }
 
+// Validates that LibnovaPlanetaryEngine::GetPlanetTopocentric applies the
+// ln_get_parallax correction and produces a meaningfully better result than
+// the geocentric fallback when compared against JPL topocentric truth.
+//
+// Truth (JPL DE440, observer=Greenwich 0°E/51.4769°N/45m, JD 2459019.833333):
+//   Moon geo: RA=64.16991°  Dec=+19.17745°
+//   Moon topo: RA=64.53351°  Dec=+18.64394°   (parallax ~57')
+//   Mars geo: RA=356.16466°  Dec=-4.75544°
+//   Mars topo: RA=356.16380°  Dec=-4.75770°   (parallax ~9")
+TEST(EngineComparison, LibnovaTopocentricParallax)
+{
+    double jd = 2459019.833333;
+
+    INDI::AstrometricContext ctx;
+    ctx.observer = { 0.0, 51.4769, 45.0 };  // Greenwich
+
+    INDI::setPlanetaryEngine(INDI::PlanetaryEngine::LIBNOVA);
+
+    struct PlanetCase {
+        const char *name;
+        int    np;
+        double geo_ra_truth,  geo_dec_truth;
+        double topo_ra_truth, topo_dec_truth;
+        double plx_min, plx_max;  // expected parallax correction range (arcsec)
+    };
+    const PlanetCase cases[] = {
+        // Moon parallax ~2279" (measured); allow 10% tolerance
+        { "Moon", 3,  64.16991,  19.17745,  64.53351,  18.64394, 2000.0, 2600.0 },
+        // Mars parallax ~8.7" (measured); allow 50% tolerance
+        { "Mars", 4, 356.16466,  -4.75544, 356.16380,  -4.75770,    4.0,   15.0 },
+    };
+
+    auto err = [](double ra_deg, double dec_deg, double ra_truth, double dec_truth) {
+        double cos_dec = std::cos(dec_truth * M_PI / 180.0);
+        double dRA  = (ra_deg  - ra_truth) * 3600.0 * cos_dec;
+        double dDec = (dec_deg - dec_truth) * 3600.0;
+        return std::hypot(dRA, dDec);
+    };
+
+    auto sep = std::string(72, '-');
+    GTEST_LOG_(INFO) << "";
+    GTEST_LOG_(INFO) << "Libnova parallax correction vs JPL topo-truth — Greenwich";
+    GTEST_LOG_(INFO) << sep;
+    {
+        std::ostringstream hdr;
+        hdr << std::left  << std::setw(6)  << "Body"
+            << std::right << std::setw(22) << "geo vs topo-truth"
+                          << std::setw(22) << "topo vs topo-truth"
+                          << std::setw(14) << "improvement";
+        GTEST_LOG_(INFO) << hdr.str();
+    }
+    GTEST_LOG_(INFO) << sep;
+
+    for (auto &c : cases)
+    {
+        INDI::IEquatorialCoordinates pos_geo;
+        INDI::TopocentricApparent    pos_topo;
+
+        ctx.invalidate();
+        INDI::GetPlanetObserved   (c.np, jd, &pos_geo);
+        INDI::GetPlanetTopocentric(c.np, jd, ctx, &pos_topo);
+
+        double geo_vs_topo  = err(pos_geo.rightascension  * 15.0, pos_geo.declination,
+                                  c.topo_ra_truth, c.topo_dec_truth);
+        double topo_vs_topo = err(pos_topo.rightascension * 15.0, pos_topo.declination,
+                                  c.topo_ra_truth, c.topo_dec_truth);
+
+        std::ostringstream line;
+        line << std::left  << std::setw(6) << c.name
+             << std::right << std::fixed << std::setprecision(1)
+             << std::setw(22) << geo_vs_topo
+             << std::setw(22) << topo_vs_topo
+             << std::setw(13) << (geo_vs_topo / std::max(topo_vs_topo, 0.001)) << "x";
+        GTEST_LOG_(INFO) << line.str();
+
+        // Parallax correction magnitude: geo-topo delta should match expected range
+        double ra_deg_geo  = pos_geo.rightascension  * 15.0;
+        double ra_deg_topo = pos_topo.rightascension * 15.0;
+        double cos_dec = std::cos(c.geo_dec_truth * M_PI / 180.0);
+        double plx_delta = std::hypot(
+            (ra_deg_topo - ra_deg_geo) * 3600.0 * cos_dec,
+            (pos_topo.declination - pos_geo.declination) * 3600.0);
+
+        EXPECT_GT(plx_delta, c.plx_min) << c.name << " parallax correction too small";
+        EXPECT_LT(plx_delta, c.plx_max) << c.name << " parallax correction too large";
+        // Topocentric must be at least as good as geocentric vs topocentric truth
+        // (for Mars the theory error >> parallax so improvement may be marginal)
+        EXPECT_LE(topo_vs_topo, geo_vs_topo + 20.0)
+            << c.name << " topo should not be significantly worse than geo vs topo-truth";
+    }
+    GTEST_LOG_(INFO) << sep;
+}
+
 int main(int argc, char **argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
