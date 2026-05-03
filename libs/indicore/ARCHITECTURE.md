@@ -24,6 +24,13 @@ class ICoordinateEngine {
                                         IGeographicCoordinates *observer,
                                         double jd,
                                         IHorizontalCoordinates *position) = 0;
+    virtual void J2000toGeocentric(const J2000Coordinates *j2000, double jd,
+                                   GeocentricApparent *out) = 0;
+    virtual void J2000toGeocentricFull(const CatalogStar *star, double jd,
+                                       GeocentricApparent *out) = 0;
+    virtual void J2000toTopocentric(const J2000Coordinates *j2000,
+                                    AstrometricContext &ctx, double jd,
+                                    TopocentricApparent *out) = 0;
 };
 ```
 
@@ -40,6 +47,31 @@ Planet codes: 1=Mercury, 2=Venus, 3=Moon, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus,
 
 ---
 
+## Coordinate Type Hierarchy
+
+`libastro.h` defines zero-cost subtypes of `IEquatorialCoordinates` that carry frame information at compile time:
+
+| Type | Frame | Produced by |
+|---|---|---|
+| `J2000Coordinates` | ICRS / J2000.0 catalog | caller |
+| `GeocentricApparent` | Geocentric CIRS apparent | `J2000toGeocentric`, `J2000toObserved` |
+| `TopocentricApparent` | Topocentric CIRS apparent | `J2000toTopocentric` |
+
+`CatalogStar` extends `J2000Coordinates` with proper motion, parallax, and radial velocity for use with `J2000toGeocentricFull`:
+
+```cpp
+struct CatalogStar : J2000Coordinates {
+    double mu_ra_masyr;    // mu_alpha * cos(dec) in mas/yr
+    double mu_dec_masyr;   // mu_delta in mas/yr
+    double parallax_mas;   // annual parallax in mas
+    double radial_vel_kms; // radial velocity in km/s (+ve receding)
+};
+```
+
+`J2000toGeocentric` and `J2000toObserved` pass zero for all catalog parameters (pm=px=rv=0) and expect the caller to pre-propagate proper motion if needed. `J2000toGeocentricFull` passes all parameters to `eraAtciq` so that annual parallax and proper-motion propagation are handled by ERFA internally.
+
+---
+
 ## Engine Implementations
 
 ### Stellar Engines (`libs/indicore/ErfaEngine.cpp`, `LibnovaEngine.cpp`)
@@ -47,56 +79,38 @@ Planet codes: 1=Mercury, 2=Venus, 3=Moon, 4=Mars, 5=Jupiter, 6=Saturn, 7=Uranus,
 | Class | Backend | Nutation | Precision | Status |
 |-------|---------|----------|-----------|--------|
 | `LibnovaStellarEngine` | libnova | IAU 1980 | ~15" | Fallback |
-| `ErfaEngine2000A` | ERFA `eraAtci13` / `eraApci13` | IAU 2000A (1,365 terms) | ~0.1 mas | Available |
-| `ErfaEngine2000B` | ERFA `eraAtci00b` / `eraApci00b` | IAU 2000B (77 terms) | ~1.0 mas | Default |
+| `ErfaEngine2000A` | ERFA `eraAtci13` / `eraApci13` | IAU 2000A (1,365 terms) | ~0.02" | Available |
+| `ErfaEngine2000B` | ERFA `eraAtci00b` / `eraApci00b` | IAU 2000B (77 terms) | ~0.02" | Default |
 
-**ERFA-2000B wrapper design**: `eraApci00b` mirrors `eraApci13` exactly, substituting two calls:
+**Time input**: all public functions receive JD as UTC. The engines convert UTC → TAI → TT via `eraUtctai` + `eraTaitt` before passing to any ERFA function that requires TT (nutation, ephemeris, BPN matrix). Functions that take UTC directly (`eraApco13`, `eraApco00b`, `eraApio13`) receive the UTC split unchanged.
+
+**ERFA-2000B wrapper design**: `eraApci00b` mirrors `eraApci13` exactly, substituting:
 - `eraPnm06a` → `eraPnm00b` (77-term nutation matrix)
 - `eraS06` → `eraS00` (CIO locator for IAU 2000)
 
-All other steps (`eraBpn2xy`, `eraApci`, `eraEors`) are identical. This gives the `ObservedToJ2000` / `J2000toObserved` pair a single consistent ASTROM context with a correctly computed equation of origins.
+`eraApco00b` mirrors `eraApco13`: it computes the Earth rotation angle (`eraEra00`), TIO locator (`eraSp00`), refraction constants (`eraRefco`), and then calls the bare `eraApco` combinator. `eraApco` uses `eraPvtob` to compute the observer's geocentric position and velocity and passes them to `eraApcs`, which sets `astrom->v` to the observer's full barycentric velocity (annual + diurnal component). This is required for `eraAtciq` to apply diurnal aberration correctly when computing topocentric coordinates.
 
-`eraApco00b` extends `eraApci00b` with observer-local setup by calling `eraApio13` after the geocentric step. `eraApio13` is nutation-model-independent — it only computes ERA, polar motion, and the TIO locator s' (`eraSp00`), none of which depend on the 2000A/B choice. This keeps `EquatorialToHorizontal` on a pure 2000B code path.
+**`EquatorialToHorizontal`**: uses `eraApco13`/`eraApco00b` + `eraAtioq`. Input is geocentric CIRS (from `J2000toObserved`); `eraAtioq` rotates to the local horizontal frame using the observer's ERA and latitude.
 
-**2000B model purity audit** — the following 2000A identifiers must not appear anywhere in the 2000B code path:
-
-| Identifier | Role | Present in 2000B? |
-|---|---|---|
-| `eraPnm06a` / `eraNut06a` | 1365-term nutation matrix | No |
-| `eraS06` | CIO locator for IAU 2006 | No |
-| `eraApci13` | geocentric ASTROM (2000A) | No |
-| `eraApco13` | observer ASTROM (2000A) | No |
-| `eraAtci13` | ICRS→CIRS (2000A) | No |
-
-All leaf functions called by the 2000B path (`eraEpv00`, `eraBpn2xy`, `eraApci`, `eraEors`, `eraAtciq`, `eraAticq`, `eraApio13`, `eraAtioq`) are model-agnostic — they operate on pre-computed BPN matrices or pre-built ASTROM contexts.
-
-**Time input**: JD is treated as UTC and split into a two-part Julian Date per ERFA convention (`utc1 = floor(jd) + 0.5`, `utc2 = jd - utc1`).
-
-**`EquatorialToHorizontal` — geocentric CIRS input, observer-local output**: uses `eraApco00b` + `eraAtioq`. This involves two conceptually distinct coordinate frames that are worth distinguishing:
-
-- The CIRS coordinates fed in (JNow RA/Dec) are **geocentric**: they were computed by `J2000toObserved` using `eraApci*`, which places the origin at the Earth's center with no observer offset.
-- `eraAtioq` with the `eraApco00b` context converts those geocentric CIRS coordinates to the **observer's local horizontal frame**, using the observer's longitude and latitude to compute local sidereal time and hence the local hour angle. This step is correct and necessary.
-
-There is no problematic mixing here — the observer location is required to rotate from CIRS to local horizontal, and `eraAtioq` does exactly that. The limitation is that no **topocentric parallax** is applied: the geocentric CIRS direction is not shifted by the geocenter-to-observer baseline (~6400 km). For stars and outer planets this shift is negligible. For the Moon (~57' parallax) and Sun (~9"), the horizontal position will be off by that amount. This is a known limitation to be addressed in M5 (topocentric promotion via `eraApco*` with full observer context through the entire pipeline).
+**`J2000toTopocentric`**: uses the cached `AstrometricContext` built by `ensureAstrom2000A`/`ensureAstrom2000B` (both call `eraApco13`/`eraApco00b` with the observer location), then `eraAtciq`. Because `eraApco*` sets `astrom->v` to the observer's velocity including diurnal rotation, `eraAtciq` applies both annual and diurnal aberration, giving topocentric CIRS output. The geo-topo delta for a zero-parallax source equals diurnal aberration only (~0.16" at mid-latitudes).
 
 ### Planetary Engines (`libs/indicore/EphEngine.cpp`, `LibnovaEngine.cpp`)
 
-The EPH library is authored by Patrick Wallace (also the original author of SLALIB and co-author of ERFA/SOFA). It implements VSOP2010 planetary theory and the ELP/MPP02 lunar theory, distributed as pre-compiled binary `.ctx` data files. See https://tpointsw.uk/eph.htm.
+The EPH library is authored by Patrick Wallace (also the original author of SLALIB and co-author of ERFA/SOFA). It implements VSOP2013 planetary theory and the ELP/MPP02 lunar theory, distributed as pre-compiled binary `.ctx` data files. See https://tpointsw.uk/eph.htm.
 
 The library is released under an ISC-style license: permission is granted to use, copy, modify, and distribute for any purpose with or without fee. Copyright (C) P.T.Wallace. All rights reserved.
-
 
 | Class | Backend | Theory | Precision | Status |
 |-------|---------|--------|-----------|--------|
 | `LibnovaPlanetaryEngine` | libnova | VSOP87 | ~1000" | Fallback |
-| `EphEngineFull` | EPH library | VSOP2010 (full) | ~0.73" geocentric | Available |
-| `EphEngineINDI` | EPH library | VSOP2010 (truncated, 2.6 MB) | +0.003" vs EPH_FULL | Available |
+| `EphEngineFull` | EPH library | VSOP2013 (full) | ~0.73" geocentric | Available |
+| `EphEngineINDI` | EPH library | VSOP2013 (truncated, 2.6 MB) | +0.003" vs EPH_FULL | Default |
 
 **Time conversion**: UTC → TAI → TT via `eraUtctai` + `eraTaitt`. TT is used as TDB (TDB-TT < 2ms geocentric). This corrects the ~69s UT1/TDB discrepancy present in the original implementation.
 
-**Context loading**: `EphEngineFull` holds the `.ctx` contexts as member variables. The Earth/EMB context and Moon context are loaded once on first use; the planet context is reloaded when `np` changes. Load failures are detected from `ephPlanc`/`ephMoonc` return values and cause an early return.
+**Context loading**: `EphEngineFull` holds the `.ctx` contexts as member variables. The Earth/EMB context and Moon context are loaded once on first use; the planet context is reloaded when `np` changes.
 
-**`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a time-weighted amplitude filter: threshold $10^{-9}$ AU with `max_tm=0.2` (±200 yr from J2000), producing a 2.6 MB dataset across 8 planets. Validated delta vs `EphEngineFull`: 0.003" for Mars at JD 2459019.833333. Both engines agree with JPL DE440 geocentric to ~0.25".
+**`EphEngineINDI`**: loads `.ictx` packed files via `ephPlanci()`, falling back to `ephPlanc()` (`.ctx`) if `.ictx` files are absent. The packer (`tools/indi_eph_packer`) applies a time-weighted amplitude filter: threshold $10^{-9}$ AU with `max_tm=0.2` (±200 yr from J2000), producing a 2.6 MB dataset across 8 planets.
 
 ### Generating EPH data files
 
@@ -105,44 +119,29 @@ are not in version control and must be generated before the first build.
 
 **Step 1 — Build the tools**
 
-Both the ASCII-to-binary converter and the INDI packer are built as part of the
-normal CMake build:
-
 ```bash
 cd build
 cmake ..
 make eph_plan_bin indi_eph_packer
 ```
 
-`eph_plan_bin` is defined in `libs/indicore/eph/CMakeLists.txt` and links
-against the `eph` static library. `indi_eph_packer` is in `tools/CMakeLists.txt`
-and links against the same library.
-
 **Step 2 — Generate `.ctx` binary context files**
 
 `eph_plan_bin` reads the VSOP2013 ASCII data files (`VSOP2013p1.dat` …
 `VSOP2013p8.dat`) from the current working directory and writes
-`VSOP2013_1.ctx` … `VSOP2013_8.ctx`. The ASCII data files are distributed
-separately and are not vendored; download them from:
+`VSOP2013_1.ctx` … `VSOP2013_8.ctx`. Download the ASCII files from:
 
     https://ftp.imcce.fr/pub/ephem/planets/vsop2013/solution/
 
 ```bash
-# Run from a directory containing the VSOP2013p*.dat files
 /path/to/build/libs/indicore/eph/eph_plan_bin
-
-# Keep the .ctx files in this working directory — they are gitignored
-# and are only needed as input to indi_eph_packer in Step 3.
 ```
 
 The Moon context files (`ELP_MPP02_JPL.ctx`, `ELP_MPP02_LLR.ctx`) are
 generated separately using the `moon_bin` tool from the upstream EPH
-distribution with the ELP/MPP02 ASCII series files.
+distribution.
 
 **Step 3 — Pack `.ictx` files (for `EphEngineINDI`)**
-
-The INDI packer applies a truncation filter to reduce the eight planet contexts
-to ~2.6 MB total while keeping error below 0.003" vs the full theory.
 
 ```bash
 mkdir -p /tmp/ictx_out
@@ -150,24 +149,15 @@ mkdir -p /tmp/ictx_out
     /path/to/indi/libs/indicore/eph \
     /tmp/ictx_out \
     1e-9 0.2
-# writes VSOP2013_1.ictx … VSOP2013_8.ictx
-
-# .ictx files are committed to the repo (2.6 MB total)
 cp /tmp/ictx_out/VSOP2013_*.ictx /path/to/indi/libs/indicore/eph/
 ```
-
-The packer reads each `.ctx` in order (bodies 1–8), applies the amplitude
-filter, and writes a compact variable-length `.ictx` with a 32-byte header
-(magic `ICTX`, version 2, ibody, nterms, threshold, reserved). The `ephPlanci`
-loader validates magic and version; a version mismatch is a hard error, so
-regenerate `.ictx` files any time the packer or `ephPLANctx` struct changes.
 
 **Step 4 — Verify**
 
 ```bash
 cd build
-./test/core/test_eph_library        # load + compute smoke tests
-./test/core/test_engine_comparison  # validates against JPL DE440
+./test/core/test_eph_library
+./test/core/test_engine_comparison
 ```
 
 ---
@@ -177,13 +167,11 @@ cd build
 `libs/indicore/libastro.cpp` manages engine lifetime and exposes the public API.
 
 ```
-INDI::setStellarEngine(StellarEngine::ERFA_2000B)   // independent selections
-INDI::setPlanetaryEngine(PlanetaryEngine::EPH_FULL)
+INDI::setStellarEngine(StellarEngine::ERFA_2000B)
+INDI::setPlanetaryEngine(PlanetaryEngine::EPH_INDI)
 ```
 
-Engines are lazily constructed on first use and destroyed on engine change. A single mutex guards all reads and writes to the engine pointers, making the dispatch layer safe for concurrent driver use.
-
-The public API (`J2000toObserved`, `ObservedToJ2000`, `EquatorialToHorizontal`, `GetPlanetObserved`, `HorizontalToEquatorial`) is unchanged from the original libnova-based `libastro` — callers require no modification.
+Engines are lazily constructed on first use and destroyed on engine change. A single mutex guards all reads and writes to the engine pointers.
 
 ---
 
@@ -193,23 +181,33 @@ All accuracy claims are verified against external sources of truth. The test sui
 
 | Domain | Reference | Rationale |
 |--------|-----------|-----------|
-| Stars | IMCCE / SIMBAD-CDS | Standard for stellar catalogs |
+| Stars (IMCCE) | IMCCE Miriade, EOP=off, IAU 2006/2000A, geocentric | Standard for stellar apparent positions |
+| Stars (SOFA) | ERFA `eraAtci13` zero-PM/parallax/RV point | Engine-internal calibration, no EOP by construction |
 | Planets | JPL Horizons (DE440) | Standard for solar system bodies |
 
-The split provides cross-validation between two independent ephemeris models (INPOP21 vs DE440). At INDI's target accuracy, the two models agree to well under 0.01" for inner planets over modern epochs.
+**IMCCE queries must use EOP=off.** With EOP=on, IMCCE applies measured IERS nutation corrections (typically 100–300 μas polar wobble) that `eraAtci13` — a pure IAU model — does not include.
 
 ### Verified results
 
-| Engine | Test | Error vs truth |
-|--------|------|----------------|
-| libnova stellar | Deneb apparent position | 15.7" |
-| ERFA-2000A | Deneb apparent position | 0.050" |
-| ERFA-2000B | Deneb apparent position | 0.050" |
-| ERFA A vs B delta | — | 0.000264" |
-| libnova planetary | Mars geocentric (2020) | 1008" |
-| EPH-Full | Mars geocentric (2020) | 0.26" vs DE440 |
-| EPH-Full | Moon geocentric (2020) | 0.25" vs DE440 |
-| EPH-INDI vs EPH-Full | Mars geocentric (2020) | 0.003" |
+| Test | Engine | Error vs truth |
+|------|--------|----------------|
+| Deneb apparent (frame-rotation only) | libnova | 0.094" |
+| Deneb apparent (frame-rotation only) | ERFA-2000B | 0.019" |
+| Deneb apparent (frame-rotation only) | ERFA-2000A | 0.020" |
+| Sirius apparent (frame-rotation only) | ERFA-2000B | 0.268" (parallax-dominated) |
+| Sirius apparent (full catalog: pm+px+rv) | ERFA-2000B | 0.024" |
+| Vega apparent (full catalog) | ERFA-2000B | 0.035" |
+| Arcturus apparent (full catalog) | ERFA-2000B | 0.001" |
+| SOFA-QSO geocentric (zero pm/px/rv) | ERFA-2000A | 0.000" (< 0.2 mas) |
+| SOFA-QSO geocentric (zero pm/px/rv) | ERFA-2000B | 0.000" (< 0.2 mas) |
+| ERFA 2000A vs 2000B delta | — | < 0.001" |
+| Geo-topo delta, zero-parallax source | ERFA-2000A | 0.157" (diurnal aberration) |
+| Geo-topo delta, zero-parallax source | ERFA-2000B | 0.157" (diurnal aberration) |
+| Mars geocentric | EPH-Full vs DE440 | 0.26" |
+| Moon geocentric | EPH-Full vs DE440 | 0.25" |
+| EPH-INDI vs EPH-Full | Mars geocentric | 0.003" |
+
+**Residuals in full-catalog mode** (pm+px+rv from Hipparcos-2 passed to ERFA, compared against IMCCE truth) are dominated by catalog differences between Hipparcos-2 and the IMCCE reference catalog, not by model error. Betelgeuse's 57 mas residual is astrometrically limited — its parallax is uncertain at ~10 mas due to its resolved angular disc.
 
 Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
@@ -219,16 +217,11 @@ Test binaries: `test/core/test_engine_comparison`, `test/core/test_eph_library`.
 
 | File | Role |
 |------|------|
-| `libs/indicore/libastro.h` | Public API: coordinate functions + engine selection enums |
+| `libs/indicore/libastro.h` | Public API: coordinate types, functions, engine selection enums |
 | `libs/indicore/libastro.cpp` | Factory dispatcher, mutex-guarded engine lifecycle |
 | `libs/indicore/CoordinateEngine.h` | `ICoordinateEngine`, `IPlanetaryEngine`, factory function declarations |
-| `libs/indicore/ErfaEngine.cpp` | `ErfaEngine2000A`, `ErfaEngine2000B`, `eraApci00b`/`eraAtci00b` wrappers |
+| `libs/indicore/ErfaEngine.cpp` | `ErfaEngine2000A`, `ErfaEngine2000B`, `eraApci00b`/`eraAtci00b`/`eraApco00b` wrappers |
 | `libs/indicore/LibnovaEngine.cpp` | `LibnovaStellarEngine`, `LibnovaPlanetaryEngine` |
 | `libs/indicore/EphEngine.cpp` | `EphEngineFull`, `EphEngineINDI` |
 | `libs/indicore/eph/` | EPH library source and `.ctx` data files (gitignored) |
-
----
-
-## Planned Extensions
-
-**M5 — Topocentric Promotion**: Introduce `INDI::ObservationContext` mapping to `eraASTROM`. Replace `eraApci*` with `eraApco*` context builders in `EquatorialToHorizontal`, enabling diurnal aberration, polar motion, and topocentric parallax when observer location is available.
+| `test/data/star_golden.json` | Ground-truth apparent positions (IMCCE + SOFA) with Hipparcos-2 catalog data |
