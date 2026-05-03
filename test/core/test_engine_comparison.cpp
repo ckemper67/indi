@@ -15,7 +15,15 @@
  * Data-driven: iterates over test/data/star_golden.json.
  * Input is the PM-propagated ICRS position at the observation epoch (ra_j2obs/dec_j2obs),
  * so PM is cancelled on both sides — residual is pure frame rotation error.
- * Truth is IMCCE apparent (includes PM from J1991.25).
+ *
+ * Truth sources:
+ *   IMCCE stars : IMCCE Miriade apparent geocentric, EOP=off, theory=IAU2006/2000A,
+ *                 no observer, no refraction.  EOP must be OFF: with EOP=on, IMCCE
+ *                 applies measured IERS nutation corrections (~200 mas polar motion
+ *                 wobble) that eraAtci13 (pure IAU model) does not include.
+ *   SOFA-QSO    : Zero-PM/parallax/RV calibration point.  Truth from SOFA t_atci13
+ *                 (doi:10.5281/zenodo.3743046), pure IAU 2006/2000A, no EOP by
+ *                 construction.  Expected error < 2 mas.
  */
 TEST(EngineComparison, StarDeviation)
 {
@@ -525,6 +533,104 @@ TEST(EngineComparison, LibnovaTopocentricParallax)
         // (for Mars the theory error >> parallax so improvement may be marginal)
         EXPECT_LE(topo_vs_topo, geo_vs_topo + 20.0)
             << c.name << " topo should not be significantly worse than geo vs topo-truth";
+    }
+    GTEST_LOG_(INFO) << sep;
+}
+
+// Calibration against SOFA t_atci13 test vector: quasar-like point (zero PM/parallax/RV).
+//
+// Validates two properties of the ERFA stellar engines:
+//   (1) Geocentric: UTC→TT conversion is applied and EO sign is correct.
+//       Without the conversion the TT error is ~67s → ~0.8 mas nutation error.
+//   (2) Topocentric: geo-topo delta for a zero-parallax source equals diurnal
+//       aberration only (no additional parallax shift).
+//
+// Truth: ERFA eraAtci13 at TT=2456165.5+0.401182685, UTC=TT-67.184s (2012 era,
+//   TAI-UTC=35 leap-seconds, TT-TAI=32.184s), zero PM/parallax/RV (pure quasar).
+//   rc=2.71 rad, dc=0.174 rad, pr=pd=px=rv=0.
+//   ri=2.709994899247256 rad, di=0.172874072098362 rad,
+//   eo=-0.002900618712657 rad  (IAU 2006/2000A; PM-independent).
+//   Note: SOFA t_atci13 test uses non-zero PM — not directly comparable to this case.
+TEST(EngineComparison, SofaCalibration)
+{
+    // UTC JD = TT − 67.184 s = 2456165.901182685 − 0.000777593 = 2456165.900405092
+    const double jd_utc = 2456165.900405092;
+
+    // ICRS direction (rc=2.71 rad, dc=0.174 rad) in engine units (hours / degrees)
+    INDI::J2000Coordinates j2000 { 2.71 * 12.0 / M_PI, 0.174 * 180.0 / M_PI };
+
+    // Expected geocentric apparent: zero-PM/parallax/RV at this epoch (see comment above)
+    const double ri_sofa = 2.709994899247256426;
+    const double di_sofa = 0.1728740720983623;
+    const double eo_sofa = -0.002900618712657375647;
+    const double expected_ra  = (ri_sofa - eo_sofa) * 12.0 / M_PI;  // hours
+    const double expected_dec = di_sofa * 180.0 / M_PI;              // degrees
+
+    // 2 mas tolerance: covers 2000A vs 2000B nutation model difference (~0.3 mas)
+    // plus floating-point and UTC→TT rounding (~0.01 mas).
+    const double tol_ra  = 2e-3 / 3600.0 / 15.0;
+    const double tol_dec = 2e-3 / 3600.0;
+
+    // --- Geocentric validation ---
+    struct Case { const char *label; INDI::StellarEngine engine; };
+    for (auto &c : std::initializer_list<Case>{
+            {"2000A", INDI::StellarEngine::ERFA_2000A},
+            {"2000B", INDI::StellarEngine::ERFA_2000B}})
+    {
+        INDI::setStellarEngine(c.engine);
+        INDI::GeocentricApparent geo;
+        INDI::J2000toGeocentric(&j2000, jd_utc, &geo);
+        EXPECT_NEAR(geo.rightascension, expected_ra,  tol_ra)  << c.label << " RA";
+        EXPECT_NEAR(geo.declination,    expected_dec, tol_dec) << c.label << " Dec";
+    }
+
+    // --- Topocentric validation (both engines) ---
+    // For zero parallax the geo-topo delta is diurnal aberration only.
+    // Max at Greenwich (lat=51.5°): v_rot*cos(lat)/c ≈ 290 m/s / c ≈ 0.20".
+    // Bound set to 0.35" to allow for any hour angle.
+    INDI::AstrometricContext ctx;
+    ctx.observer = { 0.0, 51.4769, 45.0 };  // Greenwich
+
+    auto sep = std::string(72, '-');
+    GTEST_LOG_(INFO) << "";
+    GTEST_LOG_(INFO) << "SOFA calibration — geo-topo delta (diurnal aberration, arcsec):";
+    GTEST_LOG_(INFO) << sep;
+    {
+        std::ostringstream hdr;
+        hdr << std::left  << std::setw(8)  << "Engine"
+            << std::right << std::setw(20) << "geo RA (h)"
+                          << std::setw(20) << "geo Dec (deg)"
+                          << std::setw(18) << "geo-topo delta\"";
+        GTEST_LOG_(INFO) << hdr.str();
+    }
+    GTEST_LOG_(INFO) << sep;
+
+    for (auto &c : std::initializer_list<Case>{
+            {"2000A", INDI::StellarEngine::ERFA_2000A},
+            {"2000B", INDI::StellarEngine::ERFA_2000B}})
+    {
+        INDI::setStellarEngine(c.engine);
+        INDI::GeocentricApparent  geo;
+        INDI::TopocentricApparent topo;
+        ctx.invalidate();
+        INDI::J2000toGeocentric (&j2000, jd_utc, &geo);
+        INDI::J2000toTopocentric(&j2000, ctx, jd_utc, &topo);
+
+        double cos_dec = std::cos(geo.declination * M_PI / 180.0);
+        double delta = std::hypot(
+            (topo.rightascension - geo.rightascension) * 15.0 * 3600.0 * cos_dec,
+            (topo.declination    - geo.declination)    * 3600.0);
+
+        EXPECT_LT(delta, 0.35) << c.label << " geo-topo for zero-parallax must be diurnal aberration only";
+
+        std::ostringstream line;
+        line << std::left  << std::setw(8) << c.label
+             << std::right << std::fixed << std::setprecision(9)
+             << std::setw(20) << geo.rightascension
+             << std::setw(20) << geo.declination
+             << std::fixed << std::setprecision(4)
+             << std::setw(18) << delta;
+        GTEST_LOG_(INFO) << line.str();
     }
     GTEST_LOG_(INFO) << sep;
 }

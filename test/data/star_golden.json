@@ -94,5 +94,18 @@
     "mu_delta_masyr": -1999.4,
     "ra": 214.1481587916667,
     "dec": 19.079724166666665
+  },
+  {
+    "_comment": "Zero-PM/parallax/RV calibration point. Truth computed directly from ERFA eraAtci13 at TT=2456165.5+0.401182685, UTC=TT-67.184s, with pr=pd=px=rv=0. EO=-0.002900618712657 rad (IAU 2006/2000A, epoch-dependent, PM-independent). apparent_ra=(ri-eo)*12/PI=10.36249756 h; apparent_dec=di*180/PI=9.90495472 deg. No IERS EOP — pure IAU 2006/2000A model. Expected error vs truth: < 2 mas (2000A), < 2 mas (2000B).",
+    "name": "SOFA-QSO",
+    "jd": 2456165.900405092,
+    "ra_j2000": 155.27156248,
+    "dec_j2000": 9.96946564,
+    "ra_j2obs": 155.27156248,
+    "dec_j2obs": 9.96946564,
+    "mu_alpha_star_masyr": 0.0,
+    "mu_delta_masyr": 0.0,
+    "ra": 155.43746340,
+    "dec": 9.90495472
   }
 ]

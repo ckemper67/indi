@@ -34,17 +34,30 @@ static void eraApco00b(double utc1, double utc2, double dut1,
                        double xp, double yp, double phpa, double tc, double rh, double wl,
                        eraASTROM *astrom, double *eo)
 {
-    // Geocentric part: 77-term nutation (2000B) via eraPnm00b + eraS00, same as eraApci00b.
-    // Observer part: eraApio13 is nutation-model-independent — it only uses ERA, polar motion,
-    // and the TIO locator s' (eraSp00), none of which depend on the 2000A/B choice.
-    // eraApco13 is "2000A" only because it calls eraPnm06a before eraApio13; eraApio13 itself is neutral.
+    // Mirrors eraApco13 but substitutes 2000B nutation (eraPnm00b) for 2000A.
+    // eraApco (the bare combinator) computes the observer's geocentric position/velocity
+    // via eraPvtob and passes it to eraApcs, so astrom->v includes the diurnal component.
+    // This is required for eraAtciq to apply diurnal aberration correctly.
+    double tai1, tai2, tt1, tt2;
+    eraUtctai(utc1, utc2, &tai1, &tai2);
+    eraTaitt(tai1, tai2, &tt1, &tt2);
+
+    double ut11, ut12;
+    eraUtcut1(utc1, utc2, dut1, &ut11, &ut12);
+    double theta = eraEra00(ut11, ut12);
+    double sp    = eraSp00(tt1, tt2);
+
     double ehpv[2][3], ebpv[2][3], r[3][3], x, y, s;
-    eraEpv00(utc1, utc2, ehpv, ebpv);
-    eraPnm00b(utc1, utc2, r);
+    eraEpv00(tt1, tt2, ehpv, ebpv);
+    eraPnm00b(tt1, tt2, r);
     eraBpn2xy(r, &x, &y);
-    s = eraS00(utc1, utc2, x, y);
-    eraApci(utc1, utc2, ebpv, ehpv[0], x, y, s, astrom);
-    eraApio13(utc1, utc2, dut1, elong, phi, hm, xp, yp, phpa, tc, rh, wl, astrom);
+    s = eraS00(tt1, tt2, x, y);
+
+    double refa, refb;
+    eraRefco(phpa, tc, rh, wl, &refa, &refb);
+
+    eraApco(tt1, tt2, ebpv, ehpv[0], x, y, s, theta,
+            elong, phi, hm, xp, yp, sp, refa, refb, astrom);
     *eo = eraEors(r, s);
 }
 
@@ -98,10 +111,13 @@ public:
     void J2000toObserved(INDI::IEquatorialCoordinates *j2000, double jd, INDI::IEquatorialCoordinates *jnow) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double ri = HOURS_TO_RAD(j2000->rightascension);
         double di = DEG_TO_RAD(j2000->declination);
         double rc, dc, eo;
-        eraAtci13(ri, di, 0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+        eraAtci13(ri, di, 0, 0, 0, 0, tt1, tt2, &rc, &dc, &eo);
         jnow->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
         jnow->declination = RAD_TO_DEG(dc);
 #else
@@ -112,11 +128,14 @@ public:
     void ObservedToJ2000(INDI::IEquatorialCoordinates *jnow, double jd, INDI::IEquatorialCoordinates *j2000) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double ra_jnow_rad = HOURS_TO_RAD(jnow->rightascension);
         double dec_jnow_rad = DEG_TO_RAD(jnow->declination);
         eraASTROM astrom;
         double eo;
-        eraApci13(utc1, utc2, &astrom, &eo);
+        eraApci13(tt1, tt2, &astrom, &eo);
         double ri, di;
         eraAticq(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, &astrom, &ri, &di);
         j2000->rightascension = RAD_TO_HOURS(eraAnp(ri));
@@ -164,9 +183,12 @@ public:
     void J2000toGeocentric(const INDI::J2000Coordinates *j2000, double jd, INDI::GeocentricApparent *out) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double rc, dc, eo;
         eraAtci13(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
-                  0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+                  0, 0, 0, 0, tt1, tt2, &rc, &dc, &eo);
         out->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
         out->declination    = RAD_TO_DEG(dc);
 #else
@@ -177,9 +199,12 @@ public:
     void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         eraASTROM astrom;
         double eo;
-        eraApci13(utc1, utc2, &astrom, &eo);
+        eraApci13(tt1, tt2, &astrom, &eo);
         double ri, di;
         eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + eo), DEG_TO_RAD(apparent->declination),
                  &astrom, &ri, &di);
@@ -224,10 +249,13 @@ public:
     void J2000toObserved(INDI::IEquatorialCoordinates *j2000, double jd, INDI::IEquatorialCoordinates *jnow) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double ri = HOURS_TO_RAD(j2000->rightascension);
         double di = DEG_TO_RAD(j2000->declination);
         double rc, dc, eo;
-        eraAtci00b(ri, di, 0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+        eraAtci00b(ri, di, 0, 0, 0, 0, tt1, tt2, &rc, &dc, &eo);
         jnow->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
         jnow->declination = RAD_TO_DEG(dc);
 #else
@@ -238,11 +266,14 @@ public:
     void ObservedToJ2000(INDI::IEquatorialCoordinates *jnow, double jd, INDI::IEquatorialCoordinates *j2000) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double ra_jnow_rad = HOURS_TO_RAD(jnow->rightascension);
         double dec_jnow_rad = DEG_TO_RAD(jnow->declination);
         eraASTROM astrom;
         double eo;
-        eraApci00b(utc1, utc2, &astrom, &eo);
+        eraApci00b(tt1, tt2, &astrom, &eo);
         double ri, di;
         eraAticq(eraAnp(ra_jnow_rad + eo), dec_jnow_rad, &astrom, &ri, &di);
         j2000->rightascension = RAD_TO_HOURS(eraAnp(ri));
@@ -290,9 +321,12 @@ public:
     void J2000toGeocentric(const INDI::J2000Coordinates *j2000, double jd, INDI::GeocentricApparent *out) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         double rc, dc, eo;
         eraAtci00b(HOURS_TO_RAD(j2000->rightascension), DEG_TO_RAD(j2000->declination),
-                   0, 0, 0, 0, utc1, utc2, &rc, &dc, &eo);
+                   0, 0, 0, 0, tt1, tt2, &rc, &dc, &eo);
         out->rightascension = RAD_TO_HOURS(eraAnp(rc - eo));
         out->declination    = RAD_TO_DEG(dc);
 #else
@@ -303,9 +337,12 @@ public:
     void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
         eraASTROM astrom;
         double eo;
-        eraApci00b(utc1, utc2, &astrom, &eo);
+        eraApci00b(tt1, tt2, &astrom, &eo);
         double ri, di;
         eraAticq(eraAnp(HOURS_TO_RAD(apparent->rightascension) + eo), DEG_TO_RAD(apparent->declination),
                  &astrom, &ri, &di);
