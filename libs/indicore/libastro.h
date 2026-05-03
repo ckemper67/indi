@@ -85,6 +85,23 @@ struct GeocentricApparent  : IEquatorialCoordinates {};  ///< Geocentric CIRS ap
 struct TopocentricApparent : IEquatorialCoordinates {};  ///< Topocentric CIRS apparent (parallax-corrected)
 
 /**
+ * @brief Full ICRS catalog entry for a star.
+ *
+ * Extends J2000Coordinates with proper motion, parallax, and radial velocity.
+ * Pass to J2000toGeocentricFull to obtain a geocentric apparent position that
+ * includes annual parallax and proper-motion propagation — the two effects that
+ * J2000toGeocentric / J2000toObserved omit (they always use pm=px=rv=0).
+ *
+ * Proper motion convention: mu_ra_masyr is mu_α* = (dα/dt)·cos δ  (mas/yr).
+ */
+struct CatalogStar : J2000Coordinates {
+    double mu_ra_masyr    = 0.0;  ///< mu_alpha * cos(dec) in mas/yr
+    double mu_dec_masyr   = 0.0;  ///< mu_delta in mas/yr
+    double parallax_mas   = 0.0;  ///< annual parallax in mas
+    double radial_vel_kms = 0.0;  ///< radial velocity in km/s (+ve receding)
+};
+
+/**
  * @brief Observer location and precomputed astrometric context.
  *
  * Set the input fields (observer, dut1, …) once, then pass the same context
@@ -144,6 +161,20 @@ void ObservedToJ2000(IEquatorialCoordinates *observed, double jd, IEquatorialCoo
  * @param out Geocentric apparent (CIRS) coordinates
  */
 void J2000toGeocentric(J2000Coordinates *j2000, double jd, GeocentricApparent *out);
+
+/**
+ * @brief J2000toGeocentricFull converts a full ICRS catalog star to geocentric apparent
+ * coordinates, applying proper motion propagation, annual parallax, and radial velocity
+ * in addition to precession, nutation, and aberration.
+ *
+ * For the libnova engine, proper motion and parallax are not supported; the call
+ * falls back to J2000toGeocentric using the J2000 position only.
+ *
+ * @param star Full catalog entry (J2000 position + pm + parallax + rv)
+ * @param jd Julian Date (UTC)
+ * @param out Geocentric apparent (CIRS) coordinates
+ */
+void J2000toGeocentricFull(const CatalogStar *star, double jd, GeocentricApparent *out);
 
 /**
  * @brief GeocentricToJ2000 converts geocentric apparent coordinates back to J2000.

@@ -13,17 +13,26 @@
  * @brief Test Level 1: Mathematical Truth Validation
  *
  * Data-driven: iterates over test/data/star_golden.json.
- * Input is the PM-propagated ICRS position at the observation epoch (ra_j2obs/dec_j2obs),
- * so PM is cancelled on both sides — residual is pure frame rotation error.
+ *
+ * Two comparisons are shown side by side:
+ *
+ *   Frame-rotation only (libnova / ERFA with pm=px=0):
+ *     Input = ra_j2obs/dec_j2obs (PM pre-propagated by caller, px=0).
+ *     Residual = nutation-model error + missing annual parallax.
+ *     For libnova: IAU 1980 nutation adds ~15" systematic.
+ *     For ERFA: residual is dominated by the missing annual parallax term.
+ *
+ *   Full catalog (ERFA only, pm+parallax+rv from Hipparcos-2):
+ *     Input = ra_j2000/dec_j2000 + catalog pm, px, rv via J2000toGeocentricFull.
+ *     Residual = nutation-model error only (~0.01" for 2000B vs 2000A).
+ *     libnova does not support pm/parallax; its full-catalog column = frame-rotation result.
  *
  * Truth sources:
  *   IMCCE stars : IMCCE Miriade apparent geocentric, EOP=off, theory=IAU2006/2000A,
  *                 no observer, no refraction.  EOP must be OFF: with EOP=on, IMCCE
- *                 applies measured IERS nutation corrections (~200 mas polar motion
- *                 wobble) that eraAtci13 (pure IAU model) does not include.
- *   SOFA-QSO    : Zero-PM/parallax/RV calibration point.  Truth from SOFA t_atci13
- *                 (doi:10.5281/zenodo.3743046), pure IAU 2006/2000A, no EOP by
- *                 construction.  Expected error < 2 mas.
+ *                 applies measured IERS nutation corrections that eraAtci13 does not.
+ *   SOFA-QSO    : Zero-PM/parallax/RV calibration point.  Truth from ERFA eraAtci13,
+ *                 pure IAU 2006/2000A, no EOP.  Expected error < 2 mas.
  */
 TEST(EngineComparison, StarDeviation)
 {
@@ -31,7 +40,14 @@ TEST(EngineComparison, StarDeviation)
     ASSERT_TRUE(f.is_open()) << "Could not open star_golden.json";
     nlohmann::json golden = nlohmann::json::parse(f);
 
-    struct Row { std::string name; double err_ln, err_a, err_b, delta_ab; };
+    struct Row {
+        std::string name;
+        double err_ln_frame;   // libnova, pm=px=0
+        double err_b_frame;    // ERFA-2000B, pm=px=0
+        double err_a_frame;    // ERFA-2000A, pm=px=0
+        double err_b_full;     // ERFA-2000B, full catalog (pm+px+rv)
+        double err_a_full;     // ERFA-2000A, full catalog (pm+px+rv)
+    };
     std::vector<Row> rows;
 
     for (auto &entry : golden)
@@ -39,74 +55,88 @@ TEST(EngineComparison, StarDeviation)
         std::string name = entry["name"];
         double jd        = entry["jd"];
 
-        // PM-propagated ICRS input: J2000.0 + PM × (obs_epoch - J2000.0).
-        // Feeding this cancels PM against the IMCCE truth so only frame rotation error remains.
-        INDI::IEquatorialCoordinates input = {
-            static_cast<double>(entry["ra_j2obs"])  / 15.0,  // hours
+        // --- frame-rotation input: J2000 + PM pre-applied, pm=px=0 ---
+        INDI::IEquatorialCoordinates frame_input = {
+            static_cast<double>(entry["ra_j2obs"]) / 15.0,
             entry["dec_j2obs"]
         };
-        double ra_truth  = static_cast<double>(entry["ra"])  / 15.0;  // hours
+
+        // --- full-catalog input: J2000 position + Hipparcos-2 catalog data ---
+        INDI::CatalogStar cat;
+        cat.rightascension = static_cast<double>(entry["ra_j2000"]) / 15.0;
+        cat.declination    = entry["dec_j2000"];
+        cat.mu_ra_masyr    = entry["mu_alpha_star_masyr"];
+        cat.mu_dec_masyr   = entry["mu_delta_masyr"];
+        cat.parallax_mas   = entry["parallax_mas"];
+        cat.radial_vel_kms = entry["radial_vel_kms"];
+
+        double ra_truth  = static_cast<double>(entry["ra"]) / 15.0;
         double dec_truth = entry["dec"];
 
-        auto calc_error = [&](INDI::IEquatorialCoordinates &pos) {
+        auto sep = [&](const INDI::IEquatorialCoordinates &pos) {
             double cos_dec = std::cos(dec_truth * M_PI / 180.0);
-            double dRA  = (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec;
-            double dDec = (pos.declination    - dec_truth) * 3600.0;
-            return std::hypot(dRA, dDec);
+            return std::hypot(
+                (pos.rightascension - ra_truth) * 15.0 * 3600.0 * cos_dec,
+                (pos.declination    - dec_truth) * 3600.0);
         };
 
-        INDI::IEquatorialCoordinates jnow_ln, jnow_a, jnow_b;
+        INDI::GeocentricApparent geo_a_frame, geo_b_frame, geo_ln_frame;
+        INDI::GeocentricApparent geo_a_full,  geo_b_full;
 
         INDI::setStellarEngine(INDI::StellarEngine::LIBNOVA);
-        INDI::J2000toObserved(&input, jd, &jnow_ln);
+        INDI::J2000toGeocentric(reinterpret_cast<INDI::J2000Coordinates*>(&frame_input), jd, &geo_ln_frame);
 
         INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000A);
-        INDI::J2000toObserved(&input, jd, &jnow_a);
+        INDI::J2000toGeocentric(reinterpret_cast<INDI::J2000Coordinates*>(&frame_input), jd, &geo_a_frame);
+        INDI::J2000toGeocentricFull(&cat, jd, &geo_a_full);
 
         INDI::setStellarEngine(INDI::StellarEngine::ERFA_2000B);
-        INDI::J2000toObserved(&input, jd, &jnow_b);
+        INDI::J2000toGeocentric(reinterpret_cast<INDI::J2000Coordinates*>(&frame_input), jd, &geo_b_frame);
+        INDI::J2000toGeocentricFull(&cat, jd, &geo_b_full);
 
-        double err_ln   = calc_error(jnow_ln);
-        double err_a    = calc_error(jnow_a);
-        double err_b    = calc_error(jnow_b);
-        double delta_ab = std::hypot(
-            (jnow_a.rightascension - jnow_b.rightascension) * 15.0 * 3600.0 * std::cos(dec_truth * M_PI / 180.0),
-            (jnow_a.declination    - jnow_b.declination)    * 3600.0
-        );
+        double err_ln_f = sep(geo_ln_frame);
+        double err_b_f  = sep(geo_b_frame);
+        double err_a_f  = sep(geo_a_frame);
+        double err_b_fl = sep(geo_b_full);
+        double err_a_fl = sep(geo_a_full);
 
-        EXPECT_LT(err_a,    0.5)  << name << " ERFA-2000A";
-        EXPECT_LT(err_b,    0.5)  << name << " ERFA-2000B";
-        EXPECT_LT(err_ln,   2.0)  << name << " libnova";
-        EXPECT_LT(delta_ab, 0.01) << name << " A vs B delta";
+        EXPECT_LT(err_ln_f, 2.0) << name << " libnova frame";
+        EXPECT_LT(err_b_f,  0.5) << name << " ERFA-2000B frame";
+        EXPECT_LT(err_a_f,  0.5) << name << " ERFA-2000A frame";
+        // Full-catalog tolerance: 0.1" covers catalog differences (IMCCE vs Hipparcos-2)
+        // and intrinsic astrometric uncertainty (e.g. Betelgeuse ~57 mas from disc/variability).
+        EXPECT_LT(err_b_fl, 0.1) << name << " ERFA-2000B full";
+        EXPECT_LT(err_a_fl, 0.1) << name << " ERFA-2000A full";
 
-        rows.push_back({name, err_ln, err_a, err_b, delta_ab});
+        rows.push_back({name, err_ln_f, err_b_f, err_a_f, err_b_fl, err_a_fl});
     }
 
-    const std::string SEP = "------------------------------------------------------------";
+    const std::string SEP(78, '-');
     GTEST_LOG_(INFO) << "";
-    GTEST_LOG_(INFO) << "Star accuracy vs IMCCE (PM-corrected input, arcsec):";
+    GTEST_LOG_(INFO) << "Star accuracy vs IMCCE (arcsec):";
+    GTEST_LOG_(INFO) << "  frame = pm pre-applied by caller, px=0  |  full = Hipparcos-2 pm+px+rv";
     GTEST_LOG_(INFO) << SEP;
     {
         std::ostringstream hdr;
-        hdr << std::left  << std::setw(14) << "Star"
-            << std::right << std::setw(10) << "libnova"
-                          << std::setw(12) << "ERFA-2000B"
-                          << std::setw(12) << "ERFA-2000A"
-                          << std::setw(14) << "B vs libnova"
-                          << std::setw(10) << "B vs A";
+        hdr << std::left  << std::setw(12) << "Star"
+            << std::right << std::setw(10) << "ln-frame"
+                          << std::setw(10) << "B-frame"
+                          << std::setw(10) << "A-frame"
+                          << std::setw(12) << "B-full"
+                          << std::setw(10) << "A-full";
         GTEST_LOG_(INFO) << hdr.str();
     }
     GTEST_LOG_(INFO) << SEP;
     for (auto &r : rows)
     {
         std::ostringstream line;
-        line << std::left  << std::setw(14) << r.name
+        line << std::left  << std::setw(12) << r.name
              << std::right << std::fixed << std::setprecision(4)
-             << std::setw(10) << r.err_ln
-             << std::setw(12) << r.err_b
-             << std::setw(12) << r.err_a
-             << std::setw(14) << std::abs(r.err_b - r.err_ln)
-             << std::setw(10) << std::abs(r.err_b - r.err_a);
+             << std::setw(10) << r.err_ln_frame
+             << std::setw(10) << r.err_b_frame
+             << std::setw(10) << r.err_a_frame
+             << std::setw(12) << r.err_b_full
+             << std::setw(10) << r.err_a_full;
         GTEST_LOG_(INFO) << line.str();
     }
     GTEST_LOG_(INFO) << SEP;

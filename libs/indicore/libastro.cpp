@@ -66,6 +66,11 @@ void J2000toGeocentric(J2000Coordinates *j2000, double jd, GeocentricApparent *o
     getStellarEngine().J2000toGeocentric(j2000, jd, out);
 }
 
+void J2000toGeocentricFull(const CatalogStar *star, double jd, GeocentricApparent *out)
+{
+    getStellarEngine().J2000toGeocentricFull(star, jd, out);
+}
+
 void GeocentricToJ2000(GeocentricApparent *apparent, double jd, J2000Coordinates *out)
 {
     getStellarEngine().GeocentricToJ2000(apparent, jd, out);

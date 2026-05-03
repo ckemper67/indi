@@ -104,6 +104,11 @@ public:
         J2000toObserved(const_cast<INDI::J2000Coordinates*>(j2000), jd, out);
     }
 
+    // libnova has no parallax or proper-motion support; ignore extra catalog fields.
+    void J2000toGeocentricFull(const INDI::CatalogStar *star, double jd, INDI::GeocentricApparent *out) override {
+        J2000toObserved(const_cast<INDI::CatalogStar*>(star), jd, out);
+    }
+
     void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
         ObservedToJ2000(const_cast<INDI::GeocentricApparent*>(apparent), jd, out);
     }

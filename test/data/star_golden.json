@@ -8,6 +8,8 @@
     "dec_j2obs": 45.2803511,
     "mu_alpha_star_masyr": 1.99,
     "mu_delta_masyr": 1.95,
+    "parallax_mas": 2.31,
+    "radial_vel_kms": -4.9,
     "ra": 310.5355544166666,
     "dec": 45.350363333333334
   },
@@ -20,6 +22,8 @@
     "dec_j2obs": 89.2640433,
     "mu_alpha_star_masyr": 44.22,
     "mu_delta_masyr": -11.74,
+    "parallax_mas": 7.54,
+    "radial_vel_kms": -16.42,
     "ra": 43.97619104166667,
     "dec": 89.34450774999999
   },
@@ -32,6 +36,8 @@
     "dec_j2obs": -52.6955279,
     "mu_alpha_star_masyr": 19.93,
     "mu_delta_masyr": 23.24,
+    "parallax_mas": 10.55,
+    "radial_vel_kms": 20.3,
     "ra": 96.09055725,
     "dec": -52.70807125
   },
@@ -44,6 +50,8 @@
     "dec_j2obs": -16.7230732,
     "mu_alpha_star_masyr": -545.91,
     "mu_delta_masyr": -1223.14,
+    "parallax_mas": 379.21,
+    "radial_vel_kms": -5.5,
     "ra": 101.50295391666667,
     "dec": -16.745678861111113
   },
@@ -56,6 +64,8 @@
     "dec_j2obs": 38.7853171,
     "mu_alpha_star_masyr": 200.94,
     "mu_delta_masyr": 286.23,
+    "parallax_mas": 130.23,
+    "radial_vel_kms": -13.5,
     "ra": 279.4121989166667,
     "dec": 38.802884999999996
   },
@@ -68,6 +78,8 @@
     "dec_j2obs": -8.2016372,
     "mu_alpha_star_masyr": 1.31,
     "mu_delta_masyr": 0.5,
+    "parallax_mas": 3.78,
+    "radial_vel_kms": 17.8,
     "ra": 78.87084379166667,
     "dec": -8.179858166666666
   },
@@ -80,6 +92,8 @@
     "dec_j2obs": 7.4071143,
     "mu_alpha_star_masyr": 24.95,
     "mu_delta_masyr": 9.56,
+    "parallax_mas": 6.55,
+    "radial_vel_kms": 21.91,
     "ra": 89.05976783333332,
     "dec": 7.409034666666667
   },
@@ -92,6 +106,8 @@
     "dec_j2obs": 19.171044,
     "mu_alpha_star_masyr": -1093.45,
     "mu_delta_masyr": -1999.4,
+    "parallax_mas": 88.83,
+    "radial_vel_kms": -5.23,
     "ra": 214.1481587916667,
     "dec": 19.079724166666665
   },
@@ -105,6 +121,8 @@
     "dec_j2obs": 9.96946564,
     "mu_alpha_star_masyr": 0.0,
     "mu_delta_masyr": 0.0,
+    "parallax_mas": 0.0,
+    "radial_vel_kms": 0.0,
     "ra": 155.43746340,
     "dec": 9.90495472
   }

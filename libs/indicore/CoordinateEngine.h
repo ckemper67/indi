@@ -48,6 +48,10 @@ public:
                                    double jd,
                                    INDI::GeocentricApparent *out) = 0;
 
+    virtual void J2000toGeocentricFull(const INDI::CatalogStar *star,
+                                       double jd,
+                                       INDI::GeocentricApparent *out) = 0;
+
     virtual void GeocentricToJ2000(const INDI::GeocentricApparent *apparent,
                                    double jd,
                                    INDI::J2000Coordinates *out) = 0;

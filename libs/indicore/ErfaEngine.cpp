@@ -196,6 +196,29 @@ public:
 #endif
     }
 
+    void J2000toGeocentricFull(const INDI::CatalogStar *star, double jd, INDI::GeocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
+        const double dc = DEG_TO_RAD(star->declination);
+        // eraAtci13 wants pr = dα/dt (rad/yr); mu_ra_masyr = (dα/dt)*cos δ.
+        const double mas_to_rad = M_PI / (180.0 * 3600.0 * 1000.0);
+        double ri, di, eo;
+        eraAtci13(HOURS_TO_RAD(star->rightascension), dc,
+                  star->mu_ra_masyr / std::cos(dc) * mas_to_rad,
+                  star->mu_dec_masyr * mas_to_rad,
+                  star->parallax_mas / 1000.0,
+                  star->radial_vel_kms,
+                  tt1, tt2, &ri, &di, &eo);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri - eo));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(star); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
     void GeocentricToJ2000(const INDI::GeocentricApparent *apparent, double jd, INDI::J2000Coordinates *out) override {
 #ifdef HAVE_ERFA
         double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
@@ -331,6 +354,28 @@ public:
         out->declination    = RAD_TO_DEG(dc);
 #else
         INDI_UNUSED(j2000); INDI_UNUSED(jd); INDI_UNUSED(out);
+#endif
+    }
+
+    void J2000toGeocentricFull(const INDI::CatalogStar *star, double jd, INDI::GeocentricApparent *out) override {
+#ifdef HAVE_ERFA
+        double utc1 = std::floor(jd) + 0.5, utc2 = jd - utc1;
+        double tai1, tai2, tt1, tt2;
+        eraUtctai(utc1, utc2, &tai1, &tai2);
+        eraTaitt(tai1, tai2, &tt1, &tt2);
+        const double dc = DEG_TO_RAD(star->declination);
+        const double mas_to_rad = M_PI / (180.0 * 3600.0 * 1000.0);
+        double ri, di, eo;
+        eraAtci00b(HOURS_TO_RAD(star->rightascension), dc,
+                   star->mu_ra_masyr / std::cos(dc) * mas_to_rad,
+                   star->mu_dec_masyr * mas_to_rad,
+                   star->parallax_mas / 1000.0,
+                   star->radial_vel_kms,
+                   tt1, tt2, &ri, &di, &eo);
+        out->rightascension = RAD_TO_HOURS(eraAnp(ri - eo));
+        out->declination    = RAD_TO_DEG(di);
+#else
+        INDI_UNUSED(star); INDI_UNUSED(jd); INDI_UNUSED(out);
 #endif
     }
 
