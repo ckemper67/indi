@@ -165,7 +165,7 @@ bool SPKMathPlugin::TransformCelestialToTelescope(const double RightAscension, c
         TelescopeDirectionVector &ApparentTelescopeDirectionVector)
 {
     return TransformCelestialToTelescopeJD(RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset,
+                                           INDI::getJulianDate() + JulianOffset,
                                            ApparentTelescopeDirectionVector);
 }
 
@@ -219,7 +219,7 @@ bool SPKMathPlugin::TransformTelescopeToCelestial(const TelescopeDirectionVector
         double &RightAscension, double &Declination, double JulianOffset)
 {
     return TransformTelescopeToCelestialJD(ApparentTelescopeDirectionVector, RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset);
+                                           INDI::getJulianDate() + JulianOffset);
 }
 
 bool SPKMathPlugin::TransformTelescopeToCelestialJD(const TelescopeDirectionVector &ApparentTelescopeDirectionVector,

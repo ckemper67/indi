@@ -35,6 +35,7 @@
 
 #include <math.h>
 
+#include <libnova/julian_day.h>
 #include <libnova/precession.h>
 #include <libnova/aberration.h>
 #include <libnova/transform.h>
@@ -174,5 +175,25 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////
+///
+//////////////////////////////////////////////////////////////////////////////////////////////
+static double g_JDOffset = 0.0;
 
+void setJDOffset(double offset)
+{
+    g_JDOffset = offset;
+}
+
+double getJulianDate()
+{
+    return ln_get_julian_from_sys() + g_JDOffset;
+}
+
+} // namespace INDI
+
+// C-callable shim so C translation units (indicom.c) can use simulated time.
+extern "C" double indi_get_julian_date(void)
+{
+    return INDI::getJulianDate();
 }

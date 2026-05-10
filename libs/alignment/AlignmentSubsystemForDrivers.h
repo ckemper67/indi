@@ -12,6 +12,7 @@
 #pragma once
 
 #include "indicom.h"
+#include "libastro.h"
 
 #include "MapPropertiesToInMemoryDatabase.h"
 #include "MathPluginManagement.h"
@@ -105,7 +106,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool AddAlignmentEntryEquatorial(double actualRA, double actualDec, double mountRA, double mountDec,
-                                         double JD = ln_get_julian_from_sys());
+                                         double JD = INDI::getJulianDate());
 
         /** \brief Converts an actual sky location to coordinates to send to the mount, usually called
          * in Goto.
@@ -119,7 +120,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool SkyToTelescopeEquatorial(double actualRA, double actualDec, double &mountRA, double &mountDec,
-                                      double JD = ln_get_julian_from_sys());
+                                      double JD = INDI::getJulianDate());
 
         /** \brief Converts a mount location to actual sky coordinates, usually called in ReadScopeStatus.
          * \param[in] mountRA Right Ascension where the mount thinks it is in decimal hours
@@ -132,7 +133,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool TelescopeEquatorialToSky(double mountRA, double mountDec, double &actualRA, double &actualDec,
-                                      double JD = ln_get_julian_from_sys());
+                                      double JD = INDI::getJulianDate());
 
         /** \brief Adds an alignment point to the model database, usually called from Sync.
          * \param[in] actualRA actual Right Ascension in decimal hours
@@ -145,7 +146,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool AddAlignmentEntryAltAz(double actualRA, double actualDec, double mountAlt, double mountAz,
-                                    double JD = ln_get_julian_from_sys());
+                                    double JD = INDI::getJulianDate());
 
         /** \brief Converts an actual sky location to coordinates to send to the mount, usually called
          * in Goto.
@@ -159,7 +160,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool SkyToTelescopeAltAz(double actualRA, double actualDec, double &mountAlt, double &mountAz,
-                                  double JD = ln_get_julian_from_sys());
+                                  double JD = INDI::getJulianDate());
 
         /** \brief Converts a mount location to actual sky coordinates, usually called in ReadScopeStatus.
          * \param[in] mountAlt Altitude where the mount thinks it is in decimal degrees
@@ -172,7 +173,7 @@ class AlignmentSubsystemForDrivers : public MapPropertiesToInMemoryDatabase,
          * is not set. Call UpdateLocation to set the current location.
          */
         bool TelescopeAltAzToSky(double mountAlt, double mountAz, double &actualRA, double &actualDec,
-                                  double JD = ln_get_julian_from_sys());
+                                  double JD = INDI::getJulianDate());
 
     private:
         /** \brief This static function is registered as a load database callback with

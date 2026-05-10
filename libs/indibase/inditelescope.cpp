@@ -750,6 +750,13 @@ bool Telescope::ISNewText(const char *dev, const char *name, char *texts[], char
             int utcindex    = IUFindIndex("UTC", names, n);
             int offsetindex = IUFindIndex("OFFSET", names, n);
 
+            // Set the JD offset so getJulianDate() returns simulated time for this process.
+            // Only direct client writes (KStars time injection) set the offset; the GPS
+            // snoop path (ISSnoopDevice -> processTimeInfo) does not reach this code.
+            struct ln_date utc_date;
+            if (extractISOTime(texts[utcindex], &utc_date) == 0)
+                INDI::setJDOffset(ln_get_julian_day(&utc_date) - ln_get_julian_from_sys());
+
             return processTimeInfo(texts[utcindex], texts[offsetindex]);
         }
 

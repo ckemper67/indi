@@ -123,4 +123,17 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 */
 void ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse = false);
 
+/**
+ * @brief setJDOffset stores a Julian Date offset so that getJulianDate() returns
+ * simulated time. Call with (received_JD - ln_get_julian_from_sys()) on TIME_UTC receipt.
+ * An offset of 0 means real system time (the default).
+ */
+void setJDOffset(double offset);
+
+/**
+ * @brief getJulianDate returns the current Julian Date adjusted for any simulated time offset.
+ * Use this instead of ln_get_julian_from_sys() in drivers and alignment code.
+ */
+double getJulianDate();
+
 }

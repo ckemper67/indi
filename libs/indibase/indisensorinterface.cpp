@@ -725,7 +725,7 @@ void SensorInterface::addFITSKeywords(fitsfile *fptr, uint8_t* buf, int len)
 
         // Convert from JNow to J2000
         //TODO use exp_start instead of julian from system
-        INDI::ObservedToJ2000(&epochPos, ln_get_julian_from_sys(), &J2000Pos);
+        INDI::ObservedToJ2000(&epochPos, INDI::getJulianDate(), &J2000Pos);
 
         double raJ2000  = J2000Pos.rightascension;
         double decJ2000 = J2000Pos.declination;

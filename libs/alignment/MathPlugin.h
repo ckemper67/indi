@@ -80,7 +80,8 @@ class MathPlugin
         /// \return True if successful
         /// \note Built-in plugins override this method and use JulianDate directly without reading the system clock.
         /// External plugins that have not yet adopted this interface use the default implementation, which
-        /// ignores JulianDate and delegates to TransformTelescopeToCelestial with JulianOffset=0.
+        /// computes JulianOffset = JulianDate - ln_get_julian_from_sys() and delegates to
+        /// TransformTelescopeToCelestial, so the plugin recovers the correct absolute JD internally.
         virtual bool TransformTelescopeToCelestialJD(const TelescopeDirectionVector &ApparentTelescopeDirectionVector,
                 double &RightAscension, double &Declination, double JulianDate);
 

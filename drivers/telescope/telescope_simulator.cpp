@@ -317,7 +317,7 @@ void ScopeSim::updateCurrentCoordsFromAxes()
             INDI::IEquatorialCoordinates raCoords{ encoderRA, instDec.Degrees() };
             TelescopeDirectionVector tdv =
                 TelescopeDirectionVectorFromEquatorialCoordinates(raCoords);
-            corrected = TransformTelescopeToCelestialJD(tdv, corrRA, corrDec, ln_get_julian_from_sys());
+            corrected = TransformTelescopeToCelestialJD(tdv, corrRA, corrDec, INDI::getJulianDate());
         }
         if (corrected)
         {
@@ -341,7 +341,7 @@ bool ScopeSim::ReadScopeStatus()
             TrackModeSP.findOnSwitchIndex() != TRACK_CUSTOM)
     {
         double dt      = getCurrentPollingPeriod() / 1000.0;
-        double JDnow   = ln_get_julian_from_sys();
+        double JDnow   = INDI::getJulianDate();
         double JDoffset = dt / 86400.0;
 
         // RA drift rate relative to sidereal for the selected track mode, in hours/sec.
@@ -571,7 +571,7 @@ bool ScopeSim::Goto(double r, double d)
     if (GetAlignmentDatabase().size() >= 1)
     {
         TelescopeDirectionVector tdv;
-        if (TransformCelestialToTelescopeJD(r, d, ln_get_julian_from_sys(), tdv))
+        if (TransformCelestialToTelescopeJD(r, d, INDI::getJulianDate(), tdv))
         {
             // The TDV now encodes encoder RA (time-stable), so decode with
             // EquatorialCoordinatesFromTelescopeDirectionVector — no LST conversion needed.
@@ -624,7 +624,7 @@ bool ScopeSim::Sync(double ra, double dec)
             TelescopeDirectionVectorFromEquatorialCoordinates(raCoords);
 
         AlignmentDatabaseEntry entry;
-        entry.ObservationJulianDate = ln_get_julian_from_sys();
+        entry.ObservationJulianDate = INDI::getJulianDate();
         entry.RightAscension        = ra;
         entry.Declination           = dec;
         entry.TelescopeDirection    = tdv;

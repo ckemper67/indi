@@ -405,7 +405,7 @@ bool TemmaMount::ReadScopeStatus()
         //double alignedRA, alignedDEC;
         struct INDI::IEquatorialCoordinates RaDec;
         bool aligned;
-        juliandate = ln_get_julian_from_sys();
+        juliandate = INDI::getJulianDate();
         lst = ln_get_apparent_sidereal_time(juliandate) + (LocationN[1].value * 24.0 / 360.0);
         // Use HA/Dec as  telescope coordinate system
         RaDec.ra = ((lst - currentRA) * 360.0) / 24.0;
@@ -419,7 +419,7 @@ bool TemmaMount::ReadScopeStatus()
 
         aligned = true;
 
-        if (!TransformTelescopeToCelestialJD(TDV, alignedRA, alignedDEC, ln_get_julian_from_sys()))
+        if (!TransformTelescopeToCelestialJD(TDV, alignedRA, alignedDEC, INDI::getJulianDate()))
         {
             aligned = false;
             DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT,
@@ -924,7 +924,7 @@ INDI::IEquatorialCoordinates TemmaMount::TelescopeToSky(double ra, double dec)
             here.lng=LocationN[LOCATION_LONGITUDE].value;
             eq.ra=ra*360.0/24.0;	//  this is wanted in degrees, not hours
             eq.dec=dec;
-            ln_get_hrz_from_equ(&eq,&here,ln_get_julian_from_sys(),&altaz);
+            ln_get_hrz_from_equ(&eq,&here,INDI::getJulianDate(),&altaz);
             TDV=TelescopeDirectionVectorFromAltitudeAzimuth(altaz);
         */
 
@@ -938,7 +938,7 @@ INDI::IEquatorialCoordinates TemmaMount::TelescopeToSky(double ra, double dec)
         eq.dec = dec;
         TDV    = TelescopeDirectionVectorFromLocalHourAngleDeclination(eq);
 
-        if (TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, ln_get_julian_from_sys()))
+        if (TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, INDI::getJulianDate()))
         {
             //  if we get here, the conversion was successful
             //LOG_DEBUG"new values %6.4f %6.4f %6.4f  %6.4f Deltas %3.0lf %3.0lf\n",ra,dec,RightAscension,Declination,(ra-RightAscension)*60,(dec-Declination)*60);
@@ -977,7 +977,7 @@ INDI::IEquatorialCoordinates TemmaMount::SkyToTelescope(double ra, double dec)
         //  if the alignment system has been turned off
         //  this transformation will fail, and we fall thru
         //  to using raw co-ordinates from the mount
-        if (TransformCelestialToTelescopeJD(ra, dec, ln_get_julian_from_sys(), TDV))
+        if (TransformCelestialToTelescopeJD(ra, dec, INDI::getJulianDate(), TDV))
         {
             /*  Initial attempt, using RA/DEC co-ordinates talking to alignment system
             EquatorialCoordinatesFromTelescopeDirectionVector(TDV,eq);
@@ -993,10 +993,10 @@ INDI::IEquatorialCoordinates TemmaMount::SkyToTelescope(double ra, double dec)
                 eq.dec=dec;
                 here.lat=LocationN[LOCATION_LATITUDE].value;
                 here.lng=LocationN[LOCATION_LONGITUDE].value;
-                ln_get_hrz_from_equ(&eq,&here,ln_get_julian_from_sys(),&altaz);
+                ln_get_hrz_from_equ(&eq,&here,INDI::getJulianDate(),&altaz);
             AltitudeAzimuthFromTelescopeDirectionVector(TDV,altaz);
             //  now convert the resulting altaz into radec
-                ln_get_equ_from_hrz(&altaz,&here,ln_get_julian_from_sys(),&eq);
+                ln_get_equ_from_hrz(&altaz,&here,INDI::getJulianDate(),&eq);
             RightAscension=eq.ra*24.0/360.0;
             Declination=eq.dec;
                 */

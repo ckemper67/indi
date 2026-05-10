@@ -136,7 +136,7 @@ bool NearestMathPlugin::TransformCelestialToTelescope(const double RightAscensio
         double JulianOffset, TelescopeDirectionVector &ApparentTelescopeDirectionVector)
 {
     return TransformCelestialToTelescopeJD(RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset,
+                                           INDI::getJulianDate() + JulianOffset,
                                            ApparentTelescopeDirectionVector);
 }
 
@@ -223,7 +223,7 @@ bool NearestMathPlugin::TransformTelescopeToCelestial(const TelescopeDirectionVe
         double &RightAscension, double &Declination, double JulianOffset)
 {
     return TransformTelescopeToCelestialJD(ApparentTelescopeDirectionVector, RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset);
+                                           INDI::getJulianDate() + JulianOffset);
 }
 
 bool NearestMathPlugin::TransformTelescopeToCelestialJD(const TelescopeDirectionVector &ApparentTelescopeDirectionVector,

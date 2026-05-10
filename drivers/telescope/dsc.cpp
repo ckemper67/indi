@@ -419,7 +419,7 @@ bool DSC::Sync(double ra, double dec)
         AltAz.altitude = encoderHorizontalCoordinates.altitude;
     }
 
-    NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.ObservationJulianDate = INDI::getJulianDate();
     NewEntry.RightAscension = ra;
     NewEntry.Declination   = dec;
 
@@ -468,7 +468,7 @@ INDI::IEquatorialCoordinates DSC::TelescopeEquatorialToSky()
         eq.declination = encoderEquatorialCoordinates.declination;
         TDV    = TelescopeDirectionVectorFromLocalHourAngleDeclination(eq);
 
-        if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, ln_get_julian_from_sys()))
+        if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, INDI::getJulianDate()))
         {
             RightAscension = encoderEquatorialCoordinates.rightascension;
             Declination    = encoderEquatorialCoordinates.declination;
@@ -493,7 +493,7 @@ INDI::IEquatorialCoordinates DSC::TelescopeHorizontalToSky()
     TelescopeDirectionVector TDV = TelescopeDirectionVectorFromAltitudeAzimuth(encoderHorizontalCoordinates);
     double RightAscension, Declination;
 
-    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, ln_get_julian_from_sys()))
+    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, INDI::getJulianDate()))
     {
         INDI::IEquatorialCoordinates EquatorialCoordinates {0, 0};
         TelescopeDirectionVector RotatedTDV(TDV);
@@ -518,7 +518,7 @@ INDI::IEquatorialCoordinates DSC::TelescopeHorizontalToSky()
                 break;
         }
 
-        INDI::HorizontalToEquatorial(&encoderHorizontalCoordinates, &m_Location, ln_get_julian_from_sys(), &EquatorialCoordinates);
+        INDI::HorizontalToEquatorial(&encoderHorizontalCoordinates, &m_Location, INDI::getJulianDate(), &EquatorialCoordinates);
         RightAscension = EquatorialCoordinates.rightascension;
         Declination    = EquatorialCoordinates.declination;
     }

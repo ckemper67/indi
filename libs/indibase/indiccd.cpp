@@ -490,6 +490,7 @@ bool CCD::initProperties()
     IDSnoopDevice(mount, "TELESCOPE_INFO");
     IDSnoopDevice(mount, "GEOGRAPHIC_COORD");
     IDSnoopDevice(mount, "TELESCOPE_PIER_SIDE");
+    IDSnoopDevice(mount, "TIME_UTC");
 
     // Snoop Rotator
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_ROTATOR].getText(), "ABS_ROTATOR_ANGLE");
@@ -884,6 +885,20 @@ bool CCD::ISSnoopDevice(XMLEle * root)
             }
         }
     }
+    else if (!strcmp(propName, "TIME_UTC") && deviceName == ActiveDeviceTP[ACTIVE_TELESCOPE].getText())
+    {
+        // Sync the process-local JD offset so getJulianDate() returns simulated time
+        // when KStars injects a non-real time into the telescope.
+        char utc[MAXINDITSTAMP] = {};
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            if (!strcmp(findXMLAttValu(ep, "name"), "UTC"))
+                strncpy(utc, pcdataXMLEle(ep), MAXINDITSTAMP - 1);
+        }
+        struct ln_date utc_date;
+        if (*utc && extractISOTime(utc, &utc_date) == 0)
+            INDI::setJDOffset(ln_get_julian_day(&utc_date) - ln_get_julian_from_sys());
+    }
 
     return DefaultDevice::ISSnoopDevice(root);
 }
@@ -942,6 +957,7 @@ bool CCD::ISNewText(const char * dev, const char * name, char * texts[], char * 
                     IDSnoopDevice(newMount, "EQUATORIAL_COORD");
                     IDSnoopDevice(newMount, "TELESCOPE_INFO");
                     IDSnoopDevice(newMount, "GEOGRAPHIC_COORD");
+                    IDSnoopDevice(newMount, "TIME_UTC");
                 }
                 else if (!std::isnan(RA))
                 {
@@ -2169,7 +2185,7 @@ void CCD::addFITSKeywords(CCDChip * targetChip, std::vector<FITSRecord> &fitsKey
         epochPos.declination = Dec;
 
         // Convert from JNow to J2000
-        INDI::ObservedToJ2000(&epochPos, ln_get_julian_from_sys(), &J2000Pos);
+        INDI::ObservedToJ2000(&epochPos, INDI::getJulianDate(), &J2000Pos);
 
         J2000RA = J2000Pos.rightascension;
         J2000DE = J2000Pos.declination;
@@ -2186,7 +2202,7 @@ void CCD::addFITSKeywords(CCDChip * targetChip, std::vector<FITSRecord> &fitsKey
             J2000Pos.declination = J2000DE;
 
             // Convert from JNow to J2000
-            INDI::J2000toObserved(&J2000Pos, ln_get_julian_from_sys(), &epochPos);
+            INDI::J2000toObserved(&J2000Pos, INDI::getJulianDate(), &epochPos);
 
             // Horizontal Coords
             INDI::IHorizontalCoordinates horizontalPos;
@@ -2194,7 +2210,7 @@ void CCD::addFITSKeywords(CCDChip * targetChip, std::vector<FITSRecord> &fitsKey
             observer.latitude = Latitude;
             observer.longitude = Longitude;
 
-            EquatorialToHorizontal(&epochPos, &observer, ln_get_julian_from_sys(), &horizontalPos);
+            EquatorialToHorizontal(&epochPos, &observer, INDI::getJulianDate(), &horizontalPos);
             Azimuth = horizontalPos.azimuth;
             Altitude = horizontalPos.altitude;
             Airmass = ln_get_airmass(Altitude, 750);
