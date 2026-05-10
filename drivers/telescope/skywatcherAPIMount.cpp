@@ -537,11 +537,11 @@ bool SkywatcherAPIMount::Goto(double ra, double dec)
     // Transform Celestial to Telescope coordinates.
     // We have no good way to estimate how long will the mount takes to reach target (with deceleration,
     // and not just speed). So we will use iterative GOTO once the first GOTO is complete.
-    if (TransformCelestialToTelescopeJD(ra, dec, ln_get_julian_from_sys(), TDV))
+    if (TransformCelestialToTelescopeJD(ra, dec, INDI::getJulianDate(), TDV))
     {
         INDI::IEquatorialCoordinates EquatorialCoordinates { 0, 0 };
         AltitudeAzimuthFromTelescopeDirectionVector(TDV, AltAz);
-        INDI::HorizontalToEquatorial(&AltAz, &m_Location, ln_get_julian_from_sys(), &EquatorialCoordinates);
+        INDI::HorizontalToEquatorial(&AltAz, &m_Location, INDI::getJulianDate(), &EquatorialCoordinates);
 
         char RAStr[32], DecStr[32];
         fs_sexa(RAStr, EquatorialCoordinates.rightascension, 2, 3600);
@@ -556,7 +556,7 @@ bool SkywatcherAPIMount::Goto(double ra, double dec)
         INDI::IEquatorialCoordinates EquatorialCoordinates { 0, 0 };
         EquatorialCoordinates.rightascension  = ra;
         EquatorialCoordinates.declination = dec;
-        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, ln_get_julian_from_sys(), &AltAz);
+        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, INDI::getJulianDate(), &AltAz);
         TDV = TelescopeDirectionVectorFromAltitudeAzimuth(AltAz);
         switch (GetApproximateMountAlignment())
         {
@@ -909,7 +909,7 @@ bool SkywatcherAPIMount::getCurrentRADE(INDI::IHorizontalCoordinates altaz, INDI
     DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "TDV x %lf y %lf z %lf", TDV.x, TDV.y, TDV.z);
 
     double RightAscension, Declination;
-    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, ln_get_julian_from_sys()))
+    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, INDI::getJulianDate()))
     {
         TelescopeDirectionVector RotatedTDV(TDV);
         switch (GetApproximateMountAlignment())
@@ -933,7 +933,7 @@ bool SkywatcherAPIMount::getCurrentRADE(INDI::IHorizontalCoordinates altaz, INDI
         }
 
         INDI::IEquatorialCoordinates EquatorialCoordinates;
-        INDI::HorizontalToEquatorial(&altaz, &m_Location, ln_get_julian_from_sys(), &EquatorialCoordinates);
+        INDI::HorizontalToEquatorial(&altaz, &m_Location, INDI::getJulianDate(), &EquatorialCoordinates);
         RightAscension = EquatorialCoordinates.rightascension;
         Declination = EquatorialCoordinates.declination;
     }
@@ -981,7 +981,7 @@ bool SkywatcherAPIMount::Sync(double ra, double dec)
         INDI::IHorizontalCoordinates AltAz { 0, 0 };
         TelescopeDirectionVector TDV;
 
-        if (TransformCelestialToTelescopeJD(ra, dec, ln_get_julian_from_sys(), TDV))
+        if (TransformCelestialToTelescopeJD(ra, dec, INDI::getJulianDate(), TDV))
         {
             AltitudeAzimuthFromTelescopeDirectionVector(TDV, AltAz);
             double OrigAlt = AltAz.altitude;
@@ -1009,7 +1009,7 @@ bool SkywatcherAPIMount::Sync(double ra, double dec)
            CurrentEncoders[AXIS2], ZeroPositionEncoders[AXIS2], AltAz.altitude);
 
     AlignmentDatabaseEntry NewEntry;
-    NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.ObservationJulianDate = INDI::getJulianDate();
     NewEntry.RightAscension     = ra;
     NewEntry.Declination        = dec;
     NewEntry.TelescopeDirection = TelescopeDirectionVectorFromAltitudeAzimuth(AltAz);
@@ -1346,10 +1346,10 @@ void SkywatcherAPIMount::ConvertGuideCorrection(double delta_ra, double delta_de
     TelescopeDirectionVector NewTDV;
 
     TransformCelestialToTelescopeJD(m_SkyTrackingTarget.rightascension, m_SkyTrackingTarget.declination,
-                                    ln_get_julian_from_sys(), OldTDV);
+                                    INDI::getJulianDate(), OldTDV);
     AltitudeAzimuthFromTelescopeDirectionVector(OldTDV, OldAltAz);
     TransformCelestialToTelescopeJD(m_SkyTrackingTarget.rightascension + delta_ra,
-                                    m_SkyTrackingTarget.declination + delta_dec, ln_get_julian_from_sys(), NewTDV);
+                                    m_SkyTrackingTarget.declination + delta_dec, INDI::getJulianDate(), NewTDV);
     AltitudeAzimuthFromTelescopeDirectionVector(NewTDV, NewAltAz);
     delta_alt = NewAltAz.altitude - OldAltAz.altitude;
     delta_az = NewAltAz.azimuth - OldAltAz.azimuth;
@@ -1675,7 +1675,7 @@ bool SkywatcherAPIMount::trackUsingPID()
     auto de = m_SkyTrackingTarget.declination + AxisOffsetNP[DEOffset].getValue();
     auto JDOffset = AxisOffsetNP[JulianOffset].getValue() / 86400.0;
 
-    if (TransformCelestialToTelescopeJD(ra, de, ln_get_julian_from_sys() + JDOffset, TDV))
+    if (TransformCelestialToTelescopeJD(ra, de, INDI::getJulianDate() + JDOffset, TDV))
     {
         DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "TDV x %lf y %lf z %lf", TDV.x, TDV.y, TDV.z);
         AltitudeAzimuthFromTelescopeDirectionVector(TDV, AltAz);
@@ -1683,7 +1683,7 @@ bool SkywatcherAPIMount::trackUsingPID()
     else
     {
         INDI::IEquatorialCoordinates EquatorialCoordinates { ra, de };
-        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, ln_get_julian_from_sys() + JDOffset, &AltAz);
+        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, INDI::getJulianDate() + JDOffset, &AltAz);
     }
 
     DEBUGF(DBG_SCOPE,
@@ -1872,7 +1872,7 @@ bool SkywatcherAPIMount::trackUsingPredictiveRates()
     }
 
     // Start by transforming tracking target celestial coordinates to telescope coordinates.
-    double JDnow {ln_get_julian_from_sys()};
+    double JDnow {INDI::getJulianDate()};
     if (TransformCelestialToTelescopeJD(m_SkyTrackingTarget.rightascension, m_SkyTrackingTarget.declination,
                                         JDnow, TDV))
     {

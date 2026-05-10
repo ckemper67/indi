@@ -23,6 +23,7 @@
 #include "indidome.h"
 
 #include "indicom.h"
+#include "libastro.h"
 #include "indicontroller.h"
 #include "inditimer.h"
 #include "connectionplugins/connectionserial.h"
@@ -1345,7 +1346,7 @@ bool Dome::GetTargetAz(double &Az, double &Alt, double &minAz, double &maxAz)
         return false;
     }
 
-    double JD  = ln_get_julian_from_sys();
+    double JD  = INDI::getJulianDate();
     double LST = get_local_sidereal_time(observer.longitude);
     char lstStr[64], latStr[64], lonStr[64];
     fs_sexa(lstStr, LST, 2, 3600);
@@ -1623,7 +1624,7 @@ void Dome::UpdateMountCoords()
     if (!HaveRaDec)
         return;
 
-    EquatorialToHorizontal(&mountEquatorialCoords, &observer, ln_get_julian_from_sys(), &mountHoriztonalCoords);
+    EquatorialToHorizontal(&mountEquatorialCoords, &observer, INDI::getJulianDate(), &mountHoriztonalCoords);
 
     // Control debug flooding
     if (fabs(mountHoriztonalCoords.azimuth - prev_az) > DOME_COORD_THRESHOLD ||

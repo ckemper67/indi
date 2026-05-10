@@ -412,7 +412,7 @@ bool MathPluginManagement::TransformCelestialToTelescope(const double RightAscen
         TelescopeDirectionVector &ApparentTelescopeDirectionVector)
 {
     return TransformCelestialToTelescopeJD(RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset,
+                                           INDI::getJulianDate() + JulianOffset,
                                            ApparentTelescopeDirectionVector);
 }
 
@@ -421,7 +421,7 @@ bool MathPluginManagement::TransformTelescopeToCelestial(
     double JulianOffset)
 {
     return TransformTelescopeToCelestialJD(ApparentTelescopeDirectionVector, RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset);
+                                           INDI::getJulianDate() + JulianOffset);
 }
 
 void MathPluginManagement::EnumeratePlugins()

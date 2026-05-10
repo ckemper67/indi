@@ -530,7 +530,7 @@ void AstroTrac::getEncodersFromRADE(double ra, double de, double &haEncoder, dou
 bool AstroTrac::Sync(double ra, double dec)
 {
     AlignmentDatabaseEntry NewEntry;
-    NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.ObservationJulianDate = INDI::getJulianDate();
     // Actual Celestial Coordinates
     NewEntry.RightAscension = ra;
     NewEntry.Declination = dec;
@@ -682,7 +682,7 @@ bool AstroTrac::ReadScopeStatus()
     m_MountInternalCoordinates.declination = de;
     TDV = TelescopeDirectionVectorFromEquatorialCoordinates(m_MountInternalCoordinates);
 
-    if (TransformTelescopeToCelestialJD(TDV, skyRA, skyDE, ln_get_julian_from_sys()))
+    if (TransformTelescopeToCelestialJD(TDV, skyRA, skyDE, INDI::getJulianDate()))
     {
         // double lst = get_local_sidereal_time(LocationNP[LOCATION_LONGITUDE].getValue());
         // double dHA = rangeHA(lst - skyRA);
@@ -710,7 +710,7 @@ bool AstroTrac::ReadScopeStatus()
 bool AstroTrac::getTelescopeFromSkyCoordinates(double ra, double de, INDI::IEquatorialCoordinates &telescopeCoordinates)
 {
     TelescopeDirectionVector TDV;
-    if (TransformCelestialToTelescopeJD(ra, de, ln_get_julian_from_sys(), TDV))
+    if (TransformCelestialToTelescopeJD(ra, de, INDI::getJulianDate(), TDV))
     {
         EquatorialCoordinatesFromTelescopeDirectionVector(TDV, telescopeCoordinates);
         LOGF_DEBUG("TransformCelestialToTelescope: RA=%lf DE=%lf, TDV (x :%lf, y: %lf, z: %lf), local hour RA %lf DEC %lf",

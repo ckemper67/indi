@@ -1390,10 +1390,13 @@ double rangeDec(double decdegrees)
     return decdegrees;
 }
 
+// Forward declaration of C shim defined in libastro.cpp.
+extern double indi_get_julian_date(void);
+
 #if defined(HAVE_LIBNOVA)
 double get_local_sidereal_time(double longitude)
 {
-    return range24(ln_get_apparent_sidereal_time(ln_get_julian_from_sys()) + longitude / 15.0);
+    return range24(ln_get_apparent_sidereal_time(indi_get_julian_date()) + longitude / 15.0);
 }
 
 void get_hrz_from_equ(struct ln_equ_posn *object, struct ln_lnlat_posn *observer, double JD, struct ln_hrz_posn *position)

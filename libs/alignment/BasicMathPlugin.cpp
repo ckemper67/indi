@@ -363,7 +363,7 @@ bool BasicMathPlugin::TransformCelestialToTelescope(const double RightAscension,
         TelescopeDirectionVector &ApparentTelescopeDirectionVector)
 {
     return TransformCelestialToTelescopeJD(RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset,
+                                           INDI::getJulianDate() + JulianOffset,
                                            ApparentTelescopeDirectionVector);
 }
 
@@ -599,7 +599,7 @@ bool BasicMathPlugin::TransformTelescopeToCelestial(const TelescopeDirectionVect
         double &RightAscension, double &Declination, double JulianOffset)
 {
     return TransformTelescopeToCelestialJD(ApparentTelescopeDirectionVector, RightAscension, Declination,
-                                           ln_get_julian_from_sys() + JulianOffset);
+                                           INDI::getJulianDate() + JulianOffset);
 }
 
 bool BasicMathPlugin::TransformTelescopeToCelestialJD(const TelescopeDirectionVector &ApparentTelescopeDirectionVector,

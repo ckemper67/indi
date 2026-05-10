@@ -102,7 +102,7 @@ bool ScopeSim::Goto(double ra, double dec)
     TelescopeDirectionVector TDV;
     INDI::IHorizontalCoordinates AltAz { 0, 0 };
 
-    if (TransformCelestialToTelescopeJD(ra, dec, ln_get_julian_from_sys(), TDV))
+    if (TransformCelestialToTelescopeJD(ra, dec, INDI::getJulianDate(), TDV))
     {
         // The alignment subsystem has successfully transformed my coordinate
         AltitudeAzimuthFromTelescopeDirectionVector(TDV, AltAz);
@@ -113,7 +113,7 @@ bool ScopeSim::Goto(double ra, double dec)
         // Try some simple rotations using the stored observatory position if any
 
         INDI::IEquatorialCoordinates EquatorialCoordinates { ra, dec };
-        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, ln_get_julian_from_sys(), &AltAz);
+        INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, INDI::getJulianDate(), &AltAz);
         TDV = TelescopeDirectionVectorFromAltitudeAzimuth(AltAz);
         switch (GetApproximateMountAlignment())
         {
@@ -287,7 +287,7 @@ bool ScopeSim::ReadScopeStatus()
     INDI::IHorizontalCoordinates AltAz { CurrentEncoderMicrostepsRA / MICROSTEPS_PER_DEGREE, CurrentEncoderMicrostepsDEC / MICROSTEPS_PER_DEGREE };
     TelescopeDirectionVector TDV = TelescopeDirectionVectorFromAltitudeAzimuth(AltAz);
     double RightAscension, Declination;
-    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, ln_get_julian_from_sys()))
+    if (!TransformTelescopeToCelestialJD(TDV, RightAscension, Declination, INDI::getJulianDate()))
     {
         if (TraceThisTick)
             DEBUG(DBG_SIMULATOR, "ReadScopeStatus - TransformTelescopeToCelestial failed");
@@ -321,7 +321,7 @@ bool ScopeSim::ReadScopeStatus()
         }
 
         INDI::IEquatorialCoordinates EquatorialCoordinates;
-        INDI::HorizontalToEquatorial(&AltAz, &m_Location, ln_get_julian_from_sys(), &EquatorialCoordinates);
+        INDI::HorizontalToEquatorial(&AltAz, &m_Location, INDI::getJulianDate(), &EquatorialCoordinates);
         // libnova works in decimal degrees
         RightAscension = EquatorialCoordinates.rightascension;
         Declination    = EquatorialCoordinates.declination;
@@ -343,7 +343,7 @@ bool ScopeSim::Sync(double ra, double dec)
     AltAz.altitude = double(CurrentEncoderMicrostepsDEC) / MICROSTEPS_PER_DEGREE;
     AltAz.azimuth  = double(CurrentEncoderMicrostepsRA) / MICROSTEPS_PER_DEGREE;
 
-    NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.ObservationJulianDate = INDI::getJulianDate();
     NewEntry.RightAscension        = ra;
     NewEntry.Declination           = dec;
     NewEntry.TelescopeDirection    = TelescopeDirectionVectorFromAltitudeAzimuth(AltAz);
@@ -615,7 +615,7 @@ void ScopeSim::TimerHit()
 
             if (TransformCelestialToTelescopeJD(CurrentTrackingTarget.rightascension,
                                                 CurrentTrackingTarget.declination,
-                                                ln_get_julian_from_sys() + JulianOffset, TDV))
+                                                INDI::getJulianDate() + JulianOffset, TDV))
                 AltitudeAzimuthFromTelescopeDirectionVector(TDV, AltAz);
             else
             {
@@ -623,8 +623,8 @@ void ScopeSim::TimerHit()
                 INDI::IEquatorialCoordinates EquatorialCoordinates { 0, 0 };
                 EquatorialCoordinates.rightascension  = CurrentTrackingTarget.rightascension;
                 EquatorialCoordinates.declination = CurrentTrackingTarget.declination;
-                INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, ln_get_julian_from_sys() + JulianOffset, &AltAz);
-                INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, ln_get_julian_from_sys() + JulianOffset,
+                INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, INDI::getJulianDate() + JulianOffset, &AltAz);
+                INDI::EquatorialToHorizontal(&EquatorialCoordinates, &m_Location, INDI::getJulianDate() + JulianOffset,
                                              &AltAz);
 
             }

@@ -17,6 +17,7 @@
 *******************************************************************************/
 #include "indiccdchip.h"
 #include "indidevapi.h"
+#include "libastro.h"
 #include "sharedblob.h"
 #include "locale_compat.h"
 
@@ -224,7 +225,12 @@ void CCDChip::setExposureComplete()
 void CCDChip::setExposureDuration(double duration)
 {
     ExposureDuration = duration;
-    gettimeofday(&StartExposureTime, nullptr);
+    // Derive the start timestamp from the simulated JD so DATE-OBS agrees with
+    // the RA/Dec/Az/Alt keywords when time injection is active.
+    double jd = INDI::getJulianDate();
+    double unix_sec = (jd - 2440587.5) * 86400.0;
+    StartExposureTime.tv_sec  = static_cast<time_t>(unix_sec);
+    StartExposureTime.tv_usec = static_cast<suseconds_t>((unix_sec - StartExposureTime.tv_sec) * 1e6);
 }
 
 const char *CCDChip::getFrameTypeName(CCD_FRAME fType)
