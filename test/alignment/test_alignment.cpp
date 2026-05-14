@@ -151,6 +151,23 @@ TEST(ALIGNMENT_TEST, Test_ThreeSyncPointsAltAz)
     ASSERT_DOUBLE_EQ(round(testPointAz, 1), round(roundTripAz, 1));
 }
 
+// AddAlignmentEntryEquatorial must store the explicit JD argument in the
+// database entry rather than sampling the system clock internally.
+TEST(ALIGNMENT_TEST, AddAlignmentEntryEquatorial_HonorsExplicitJD)
+{
+    const double kJD = 2451545.0;  // J2000.0
+
+    Scope s(INDI::AlignmentSubsystem::MathPluginManagement::EQUATORIAL);
+    ASSERT_TRUE(s.updateLocation(34.05, -118.25, 0));
+    s.Handshake();
+
+    ASSERT_TRUE(s.AddAlignmentEntryEquatorial(12.0, 45.0, 12.0, 45.0, kJD));
+
+    const auto &db = s.GetAlignmentDatabase();
+    ASSERT_EQ(db.size(), 1u);
+    EXPECT_DOUBLE_EQ(db[0].ObservationJulianDate, kJD);
+}
+
 int main(int argc, char **argv)
 {
     INDI::Logger::getInstance().configure("", INDI::Logger::file_off,

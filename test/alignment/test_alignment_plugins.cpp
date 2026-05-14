@@ -2286,6 +2286,22 @@ struct LegacyPlugin : public MathPlugin
     }
 };
 
+// CapturingPlugin wraps BasicMathPlugin to record which JD the compat shim
+// (TransformCelestialToTelescope / TransformTelescopeToCelestial) forwards to
+// the new *JD method.  Used to verify that the shim uses INDI::getJulianDate()
+// rather than ln_get_julian_from_sys() when a simulated-time offset is active.
+struct CapturingPlugin : public BuiltInMathPlugin
+{
+    double capturedJD = 0.0;
+
+    bool TransformCelestialToTelescopeJD(double RA, double Dec, double JD,
+                                          TelescopeDirectionVector &TDV) override
+    {
+        capturedJD = JD;
+        return BuiltInMathPlugin::TransformCelestialToTelescopeJD(RA, Dec, JD, TDV);
+    }
+};
+
 } // namespace
 
 TEST_F(AlignmentPluginTest, LegacyPlugin_JD_Fallback_CelestialToTelescope)
@@ -2322,6 +2338,81 @@ TEST_F(AlignmentPluginTest, LegacyPlugin_JD_Fallback_TelescopeToCelestial)
 
     EXPECT_GE(plugin.lastOffset, fixedJD - t2) << "offset too small";
     EXPECT_LE(plugin.lastOffset, fixedJD - t1) << "offset too large (was 0.0 before fix)";
+}
+
+// ---------------------------------------------------------------------------
+// Simulated-time propagation tests
+//
+// Verify that INDI::setJDOffset correctly propagates through the full call
+// chain so that both the new *JD API and the legacy compat shims use the
+// simulated Julian Date rather than the system clock.
+// ---------------------------------------------------------------------------
+
+// When a JD offset is active, calling TransformCelestialToTelescopeJD with
+// INDI::getJulianDate() must forward the correct JulianOffset to a legacy
+// plugin so it recovers the simulated time internally.
+TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_CelestialToTelescope)
+{
+    const double kOffset = 10.0 * 365.25;
+    INDI::setJDOffset(kOffset);
+
+    LegacyPlugin plugin;
+    InMemoryDatabase db;
+    plugin.Initialise(&db);
+
+    TelescopeDirectionVector tdv;
+    plugin.TransformCelestialToTelescopeJD(12.0, 45.0, INDI::getJulianDate(), tdv);
+
+    // Base-class fallback: lastOffset = JD - ln_get_julian_from_sys()
+    // With JD = getJulianDate() = sys + kOffset -> lastOffset ~= kOffset.
+    EXPECT_NEAR(plugin.lastOffset, kOffset, 1.0 / 86400.0);
+
+    INDI::setJDOffset(0.0);
+}
+
+TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_TelescopeToCelestial)
+{
+    const double kOffset = 10.0 * 365.25;
+    INDI::setJDOffset(kOffset);
+
+    LegacyPlugin plugin;
+    InMemoryDatabase db;
+    plugin.Initialise(&db);
+
+    TelescopeDirectionVector tdv{0.0, 0.0, 1.0};
+    double ra = 0, dec = 0;
+    plugin.TransformTelescopeToCelestialJD(tdv, ra, dec, INDI::getJulianDate());
+
+    EXPECT_NEAR(plugin.lastOffset, kOffset, 1.0 / 86400.0);
+
+    INDI::setJDOffset(0.0);
+}
+
+// When a JD offset is active, the compat shim TransformCelestialToTelescope
+// (old API, JulianOffset=0) must call the *JD override with getJulianDate(),
+// not with ln_get_julian_from_sys().  CapturingPlugin intercepts the *JD call
+// to verify the forwarded JD equals sys + kOffset.
+TEST_F(AlignmentPluginTest, SimulatedTime_CompatShim_ForwardsGetJulianDate)
+{
+    const double kOffset = 10.0 * 365.25;
+    INDI::setJDOffset(kOffset);
+
+    InMemoryDatabase db;
+    db.SetDatabaseReferencePosition(kLosAngeles);
+    CapturingPlugin plugin;
+    plugin.Initialise(&db);
+
+    TelescopeDirectionVector tdv;
+    double t1 = ln_get_julian_from_sys();
+    plugin.TransformCelestialToTelescope(12.0, 45.0, 0.0, tdv);
+    double t2 = ln_get_julian_from_sys();
+
+    // Compat shim calls TransformCelestialToTelescopeJD with getJulianDate() + 0.
+    // capturedJD should be in [t1 + kOffset, t2 + kOffset].
+    EXPECT_GE(plugin.capturedJD, t1 + kOffset - 1.0 / 86400.0);
+    EXPECT_LE(plugin.capturedJD, t2 + kOffset + 1.0 / 86400.0);
+
+    INDI::setJDOffset(0.0);
 }
 
 int main(int argc, char **argv)
