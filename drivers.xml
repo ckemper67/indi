@@ -1148,4 +1148,10 @@
             <version>1.2</version>
         </device>
     </devGroup>
+    <devGroup group="Adaptive Optics">
+        <device label="Orion SteadyStar" manufacturer="Orion">
+            <driver name="Orion SteadyStar">indi_orion_steadystar</driver>
+            <version>1.0</version>
+        </device>
+    </devGroup>
 </driversList>

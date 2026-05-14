@@ -1,0 +1,5 @@
+# Orion SteadyStar AO unit (Atmel/LUFA Generic HID, VID=0x03EB PID=0x2013)
+# Grants read/write access to all users, allowing libusb to open and claim
+# the interface without root. The MODE="0666" also permits libusb to detach
+# the hid-generic kernel driver via USBDEVFS_DISCONNECT.
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2013", MODE="0666", TAG+="uaccess"
