@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 #include <libastro.h>
+#include <libnova/julian_day.h>
 #ifdef _USE_SYSTEM_JSONLIB
 #include <indijson.hpp>
 #else
@@ -248,6 +249,51 @@ TEST(Libastro, RoundTrip_HorizontalToEquatorial)
         EXPECT_LT(dec_err, 1.0) << "Round-trip Dec error for " << c.object << " at " << c.site;
     }
     GTEST_LOG_(INFO) << "Round-trip max: RA=" << max_ra_err << "\" Dec=" << max_dec_err << "\"";
+}
+
+// ---------------------------------------------------------------------------
+// INDI::setJDOffset / INDI::getJulianDate simulated-time API
+// ---------------------------------------------------------------------------
+
+TEST(SimulatedTime, DefaultOffsetIsZero)
+{
+    INDI::setJDOffset(0.0);
+    double t1 = ln_get_julian_from_sys();
+    double jd = INDI::getJulianDate();
+    double t2 = ln_get_julian_from_sys();
+    EXPECT_GE(jd, t1) << "getJulianDate() < sys with zero offset";
+    EXPECT_LE(jd, t2) << "getJulianDate() > sys with zero offset";
+}
+
+TEST(SimulatedTime, PositiveOffsetApplied)
+{
+    const double kOffset = 365.25;
+    INDI::setJDOffset(kOffset);
+    double jd  = INDI::getJulianDate();
+    double sys = ln_get_julian_from_sys();
+    EXPECT_NEAR(jd - sys, kOffset, 1.0 / 86400.0);
+    INDI::setJDOffset(0.0);
+}
+
+TEST(SimulatedTime, NegativeOffsetApplied)
+{
+    const double kOffset = -365.25;
+    INDI::setJDOffset(kOffset);
+    double jd  = INDI::getJulianDate();
+    double sys = ln_get_julian_from_sys();
+    EXPECT_NEAR(jd - sys, kOffset, 1.0 / 86400.0);
+    INDI::setJDOffset(0.0);
+}
+
+TEST(SimulatedTime, OffsetCanBeReset)
+{
+    INDI::setJDOffset(1000.0);
+    INDI::setJDOffset(0.0);
+    double t1 = ln_get_julian_from_sys();
+    double jd = INDI::getJulianDate();
+    double t2 = ln_get_julian_from_sys();
+    EXPECT_GE(jd, t1) << "getJulianDate() < sys after reset";
+    EXPECT_LE(jd, t2) << "getJulianDate() > sys after reset";
 }
 
 int main(int argc, char **argv)
