@@ -150,39 +150,53 @@ void MathPluginManagement::ProcessTextProperties(Telescope *pTelescope, const ch
             // It is not the built in so try to load it
             if (nullptr != (LoadedMathPluginHandle = dlopen(AlignmentSubsystemCurrentMathPlugin.text, RTLD_NOW)))
             {
-                typedef MathPlugin *Create_t();
-                Create_t *Create = (Create_t *)dlsym(LoadedMathPluginHandle, "Create");
-                if (nullptr != Create)
+                typedef unsigned int GetInterfaceVersion_t();
+                GetInterfaceVersion_t *GetInterfaceVersion = (GetInterfaceVersion_t *)dlsym(LoadedMathPluginHandle, "GetInterfaceVersion");
+                if (nullptr == GetInterfaceVersion || GetInterfaceVersion() != MATH_PLUGIN_INTERFACE_VERSION)
                 {
-                    pLoadedMathPlugin = Create();
-                    SetApproximateMountAlignment(currentMountAlignment);
-                    Initialise(CurrentInMemoryDatabase);
-
-                    // TODO - Update the client to reflect the new plugin
-                    int i = 0;
-
-                    for (i = 0; i < (int)MathPluginFiles.size(); i++)
-                    {
-                        if (0 == strcmp(AlignmentSubsystemCurrentMathPlugin.text, MathPluginFiles[i].c_str()))
-                            break;
-                    }
-                    if (i < (int)MathPluginFiles.size())
-                    {
-                        IUResetSwitch(&AlignmentSubsystemMathPluginsV);
-                        (AlignmentSubsystemMathPlugins.get() + i + 1)->s = ISS_ON;
-                        //  Update client
-                        IDSetSwitch(&AlignmentSubsystemMathPluginsV, nullptr);
-                    }
-                    else
-                    {
-                        DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_WARNING,
-                                     "MathPluginManagement - cannot find %s in list of plugins", MathPluginFiles[i].c_str());
-                    }
+                    DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR,
+                                 "MathPluginManagement - plugin %s has incompatible interface version (expected %u) -- not loaded",
+                                 AlignmentSubsystemCurrentMathPlugin.text, MATH_PLUGIN_INTERFACE_VERSION);
+                    dlclose(LoadedMathPluginHandle);
+                    LoadedMathPluginHandle = nullptr;
+                    AlignmentSubsystemMathPluginsV.s = IPS_ALERT;
                 }
                 else
                 {
-                    DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR, "MathPluginManagement - cannot get Create function - %s",
-                                 dlerror());
+                    typedef MathPlugin *Create_t();
+                    Create_t *Create = (Create_t *)dlsym(LoadedMathPluginHandle, "Create");
+                    if (nullptr != Create)
+                    {
+                        pLoadedMathPlugin = Create();
+                        SetApproximateMountAlignment(currentMountAlignment);
+                        Initialise(CurrentInMemoryDatabase);
+
+                        // TODO - Update the client to reflect the new plugin
+                        int i = 0;
+
+                        for (i = 0; i < (int)MathPluginFiles.size(); i++)
+                        {
+                            if (0 == strcmp(AlignmentSubsystemCurrentMathPlugin.text, MathPluginFiles[i].c_str()))
+                                break;
+                        }
+                        if (i < (int)MathPluginFiles.size())
+                        {
+                            IUResetSwitch(&AlignmentSubsystemMathPluginsV);
+                            (AlignmentSubsystemMathPlugins.get() + i + 1)->s = ISS_ON;
+                            //  Update client
+                            IDSetSwitch(&AlignmentSubsystemMathPluginsV, nullptr);
+                        }
+                        else
+                        {
+                            DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_WARNING,
+                                         "MathPluginManagement - cannot find %s in list of plugins", MathPluginFiles[i].c_str());
+                        }
+                    }
+                    else
+                    {
+                        DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR, "MathPluginManagement - cannot get Create function - %s",
+                                     dlerror());
+                    }
                 }
             }
             else
@@ -303,20 +317,34 @@ void MathPluginManagement::HandlePluginLoading(Telescope *pTelescope, int Curren
             std::string PluginPath(MathPluginFiles[NewPlugin - 1]);
             if (nullptr != (LoadedMathPluginHandle = dlopen(PluginPath.c_str(), RTLD_NOW)))
             {
-                typedef MathPlugin *Create_t();
-                Create_t *Create = (Create_t *)dlsym(LoadedMathPluginHandle, "Create");
-                if (nullptr != Create)
+                typedef unsigned int GetInterfaceVersion_t();
+                GetInterfaceVersion_t *GetInterfaceVersion = (GetInterfaceVersion_t *)dlsym(LoadedMathPluginHandle, "GetInterfaceVersion");
+                if (nullptr == GetInterfaceVersion || GetInterfaceVersion() != MATH_PLUGIN_INTERFACE_VERSION)
                 {
-                    pLoadedMathPlugin = Create();
-                    SetApproximateMountAlignment(currentMountAlignment);
-                    Initialise(CurrentInMemoryDatabase);
-                    IUSaveText(&AlignmentSubsystemCurrentMathPlugin, PluginPath.c_str());
+                    DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR,
+                                 "MathPluginManagement - plugin %s has incompatible interface version (expected %u) -- not loaded",
+                                 PluginPath.c_str(), MATH_PLUGIN_INTERFACE_VERSION);
+                    dlclose(LoadedMathPluginHandle);
+                    LoadedMathPluginHandle = nullptr;
+                    AlignmentSubsystemMathPluginsV.s = IPS_ALERT;
                 }
                 else
                 {
-                    DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR, "MathPluginManagement - cannot get Create function - %s",
-                                 dlerror());
-                    AlignmentSubsystemMathPluginsV.s = IPS_ALERT;
+                    typedef MathPlugin *Create_t();
+                    Create_t *Create = (Create_t *)dlsym(LoadedMathPluginHandle, "Create");
+                    if (nullptr != Create)
+                    {
+                        pLoadedMathPlugin = Create();
+                        SetApproximateMountAlignment(currentMountAlignment);
+                        Initialise(CurrentInMemoryDatabase);
+                        IUSaveText(&AlignmentSubsystemCurrentMathPlugin, PluginPath.c_str());
+                    }
+                    else
+                    {
+                        DEBUGFDEVICE(pTelescope->getDeviceName(), INDI::Logger::DBG_ERROR, "MathPluginManagement - cannot get Create function - %s",
+                                     dlerror());
+                        AlignmentSubsystemMathPluginsV.s = IPS_ALERT;
+                    }
                 }
             }
             else
@@ -471,12 +499,24 @@ void MathPluginManagement::EnumeratePlugins()
                 continue;
             }
 
+            // Reject plugins built against an incompatible interface version.
+            typedef unsigned int GetInterfaceVersion_t();
+            GetInterfaceVersion_t *GetInterfaceVersionPtr = (GetInterfaceVersion_t *)dlsym(Handle, "GetInterfaceVersion");
+            if (nullptr == GetInterfaceVersionPtr || GetInterfaceVersionPtr() != MATH_PLUGIN_INTERFACE_VERSION)
+            {
+                IDLog("EnumeratePlugins - skipping plugin %s: incompatible interface version (expected %u)\n",
+                      PluginPath.c_str(), MATH_PLUGIN_INTERFACE_VERSION);
+                dlclose(Handle);
+                continue;
+            }
+
             // Try to get the plugin display name
             typedef const char *GetDisplayName_t();
             GetDisplayName_t *GetDisplayNamePtr = (GetDisplayName_t *)dlsym(Handle, "GetDisplayName");
             if (nullptr == GetDisplayNamePtr)
             {
                 IDLog("EnumeratePlugins - cannot get plugin %s DisplayName error %s\n", PluginPath.c_str(), dlerror());
+                dlclose(Handle);
                 continue;
             }
             IDLog("EnumeratePlugins - found plugin %s\n", GetDisplayNamePtr());

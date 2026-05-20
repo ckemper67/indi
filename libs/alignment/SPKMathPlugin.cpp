@@ -51,6 +51,11 @@ extern "C" {
     {
         return "SPK Math Plugin";
     }
+
+    unsigned int GetInterfaceVersion()
+    {
+        return INDI::AlignmentSubsystem::MATH_PLUGIN_INTERFACE_VERSION;
+    }
 }
 #endif
 

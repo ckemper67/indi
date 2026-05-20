@@ -29,6 +29,11 @@ extern "C" {
     {
         return "SVD Math Plugin";
     }
+
+    unsigned int GetInterfaceVersion()
+    {
+        return INDI::AlignmentSubsystem::MATH_PLUGIN_INTERFACE_VERSION;
+    }
 }
 #endif
 void SVDMathPlugin::CalculateTransformMatrices(const TelescopeDirectionVector &Alpha1,

@@ -108,5 +108,10 @@ extern "C" {
     {
         return "Built In Math Plugin";
     }
+
+    unsigned int GetInterfaceVersion()
+    {
+        return INDI::AlignmentSubsystem::MATH_PLUGIN_INTERFACE_VERSION;
+    }
 }
 #endif

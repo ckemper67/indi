@@ -27,6 +27,13 @@ namespace AlignmentSubsystem
  * when only two reference points are available and a third reference point has to artificially generated in order to
  * derive the matrix coefficients.
  */
+/// Interface version exported by external math plugin shared libraries.
+/// Plugins must export: extern "C" unsigned int GetInterfaceVersion() { return MATH_PLUGIN_INTERFACE_VERSION; }
+/// MathPluginManagement rejects any plugin whose GetInterfaceVersion() differs from this constant,
+/// preventing vtable-layout mismatches from causing crashes.
+/// Bump this value whenever the MathPlugin virtual function table changes.
+static constexpr unsigned int MATH_PLUGIN_INTERFACE_VERSION = 2;
+
 class MathPlugin
 {
     public:
