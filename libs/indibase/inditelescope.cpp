@@ -23,6 +23,7 @@
 #include "connectionplugins/connectionserial.h"
 #include "connectionplugins/connectiontcp.h"
 
+#include <libnova/refraction.h>
 #include <libnova/sidereal_time.h>
 #include <libnova/transform.h>
 
@@ -74,8 +75,14 @@ bool Telescope::initProperties()
     // @INDI_STANDARD_PROPERTY@
     ActiveDeviceTP[ACTIVE_GPS].fill("ACTIVE_GPS", "GPS", "GPS Simulator");
     ActiveDeviceTP[ACTIVE_DOME].fill("ACTIVE_DOME", "DOME", "Dome Simulator");
+    ActiveDeviceTP[ACTIVE_WEATHER].fill("ACTIVE_WEATHER", "Weather", "Weather Simulator");
     ActiveDeviceTP.fill(getDeviceName(), "ACTIVE_DEVICES", "Snoop devices", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
     ActiveDeviceTP.load();
+
+    RefractionCorrectionSP[REFRACTION_CORRECTION_ON].fill("REFRACTION_CORRECTION_ON", "Enabled", ISS_OFF);
+    RefractionCorrectionSP[REFRACTION_CORRECTION_OFF].fill("REFRACTION_CORRECTION_OFF", "Disabled", ISS_ON);
+    RefractionCorrectionSP.fill(getDeviceName(), "TELESCOPE_REFRACTION_CORRECTION", "Refraction Correction",
+                                OPTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
 
     // Use locking if dome is closed (and or) park scope if dome is closing
     // @INDI_STANDARD_PROPERTY@
@@ -278,6 +285,8 @@ bool Telescope::initProperties()
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_DOME].getText(), "DOME_PARK");
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_DOME].getText(), "DOME_SHUTTER");
 
+    IDSnoopDevice(ActiveDeviceTP[ACTIVE_WEATHER].getText(), "WEATHER_PARAMETERS");
+
     addPollPeriodControl();
 
     double longitude = 0, latitude = 0, elevation = 0;
@@ -316,6 +325,16 @@ void Telescope::ISGetProperties(const char *dev)
             DomePolicySP[DOME_LOCKS].setState((isDomeIgnored == ISS_ON) ? ISS_OFF : ISS_ON);
         }
         defineProperty(DomePolicySP);
+
+        ISState isRefractionOn = ISS_OFF;
+        if (IUGetConfigSwitch(getDeviceName(), RefractionCorrectionSP.getName(),
+                              RefractionCorrectionSP[REFRACTION_CORRECTION_ON].getName(), &isRefractionOn) == 0)
+        {
+            RefractionCorrectionSP[REFRACTION_CORRECTION_ON].setState(isRefractionOn);
+            RefractionCorrectionSP[REFRACTION_CORRECTION_OFF].setState((isRefractionOn == ISS_ON) ? ISS_OFF : ISS_ON);
+            m_RefractionEnabled = (isRefractionOn == ISS_ON);
+        }
+        defineProperty(RefractionCorrectionSP);
     }
 
     if (CanGOTO())
@@ -599,6 +618,23 @@ bool Telescope::ISSnoopDevice(XMLEle *root)
                 }
             return true;
         }
+        else if (!strcmp(propName, "WEATHER_PARAMETERS") && deviceName == ActiveDeviceTP[ACTIVE_WEATHER].getText())
+        {
+            if (strcmp(findXMLAttValu(root, "state"), "Ok"))
+                return false;
+
+            for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+            {
+                const char *elemName = findXMLAttValu(ep, "name");
+
+                if (!strcmp(elemName, "WEATHER_TEMPERATURE"))
+                    m_AtmTemperature = atof(pcdataXMLEle(ep));
+                else if (!strcmp(elemName, "WEATHER_PRESSURE") || !strcmp(elemName, "WEATHER_BAROMETRIC_PRESSURE"))
+                    m_AtmPressure = atof(pcdataXMLEle(ep));
+            }
+
+            return true;
+        }
     }
 
     return DefaultDevice::ISSnoopDevice(root);
@@ -634,6 +670,7 @@ bool Telescope::saveConfigItems(FILE *fp)
 
     ActiveDeviceTP.save(fp);
     DomePolicySP.save(fp);
+    RefractionCorrectionSP.save(fp);
 
     // Ensure that we only save valid locations
     if (HasLocation() && (LocationNP[LOCATION_LONGITUDE].getValue() != 0 || LocationNP[LOCATION_LATITUDE].getValue() != 0))
@@ -661,6 +698,21 @@ bool Telescope::saveConfigItems(FILE *fp)
 
 void Telescope::NewRaDec(double ra, double dec)
 {
+    // Remove atmospheric refraction: the mount points at the apparent (refracted)
+    // position; convert back to the geometric catalog position for clients.
+    if (m_RefractionEnabled && m_Location.latitude != 0)
+    {
+        IEquatorialCoordinates eq {ra, dec};
+        IHorizontalCoordinates hz;
+        double jd = INDI::getJulianDate();
+        EquatorialToHorizontal(&eq, &m_Location, jd, &hz);
+        if (hz.altitude > 0)
+            hz.altitude -= ln_get_refraction_adj(hz.altitude, m_AtmPressure, m_AtmTemperature);
+        HorizontalToEquatorial(&hz, &m_Location, jd, &eq);
+        ra  = eq.rightascension;
+        dec = eq.declination;
+    }
+
     switch (TrackState)
     {
         case SCOPE_PARKED:
@@ -773,6 +825,8 @@ bool Telescope::ISNewText(const char *dev, const char *name, char *texts[], char
             IDSnoopDevice(ActiveDeviceTP[ACTIVE_DOME].getText(), "DOME_PARK");
             IDSnoopDevice(ActiveDeviceTP[ACTIVE_DOME].getText(), "DOME_SHUTTER");
 
+            IDSnoopDevice(ActiveDeviceTP[ACTIVE_WEATHER].getText(), "WEATHER_PARAMETERS");
+
             saveConfig(ActiveDeviceTP);
             return true;
         }
@@ -846,6 +900,22 @@ bool Telescope::ISNewNumber(const char *dev, const char *name, double values[], 
 
                 // Remember Track State
                 RememberTrackState = TrackState;
+
+                // Apply atmospheric refraction correction: convert geometric RA/Dec
+                // to the apparent (refracted) position the mount must point to.
+                if (m_RefractionEnabled && m_Location.latitude != 0)
+                {
+                    IEquatorialCoordinates eq {ra, dec};
+                    IHorizontalCoordinates hz;
+                    double jd = INDI::getJulianDate();
+                    EquatorialToHorizontal(&eq, &m_Location, jd, &hz);
+                    if (hz.altitude > 0)
+                        hz.altitude += ln_get_refraction_adj(hz.altitude, m_AtmPressure, m_AtmTemperature);
+                    HorizontalToEquatorial(&hz, &m_Location, jd, &eq);
+                    ra  = eq.rightascension;
+                    dec = eq.declination;
+                }
+
                 // Issue GOTO/Flip
                 if(doFlip)
                 {
@@ -1511,6 +1581,23 @@ bool Telescope::ISNewSwitch(const char *dev, const char *name, ISState *states, 
             DomePolicySP.setState(IPS_OK);
             DomePolicySP.apply( );
             triggerSnoop(ActiveDeviceTP[ACTIVE_DOME].getText(), "DOME_PARK");
+            return true;
+        }
+
+        ///////////////////////////////////
+        // Refraction Correction
+        ///////////////////////////////////
+        if (RefractionCorrectionSP.isNameMatch(name))
+        {
+            RefractionCorrectionSP.update(states, names, n);
+            m_RefractionEnabled = (RefractionCorrectionSP[REFRACTION_CORRECTION_ON].getState() == ISS_ON);
+            if (m_RefractionEnabled)
+                LOG_INFO("Atmospheric refraction correction enabled. Set ACTIVE_WEATHER to a weather driver for live temperature and pressure.");
+            else
+                LOG_INFO("Atmospheric refraction correction disabled.");
+            RefractionCorrectionSP.setState(IPS_OK);
+            RefractionCorrectionSP.apply();
+            saveConfig(RefractionCorrectionSP);
             return true;
         }
 

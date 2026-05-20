@@ -715,6 +715,11 @@ class Telescope : public DefaultDevice
         // Geographic Location
         IGeographicCoordinates m_Location { 0, 0, 0 };
 
+        // Atmospheric conditions for refraction correction
+        bool   m_RefractionEnabled {false};
+        double m_AtmTemperature    {10.0};   // Celsius, ICAO standard atmosphere
+        double m_AtmPressure       {1010.0}; // mBar, ICAO standard atmosphere
+
         /**
          * @brief Validate a file name
          * @param file_name File name
@@ -826,16 +831,25 @@ class Telescope : public DefaultDevice
         };
         void sendTimeFromSystem();
 
-        // Active GPS/Dome device to snoop
-        INDI::PropertyText ActiveDeviceTP {2};
+        // Active GPS/Dome/Weather device to snoop
+        INDI::PropertyText ActiveDeviceTP {3};
         enum
         {
             ACTIVE_GPS,
-            ACTIVE_DOME
+            ACTIVE_DOME,
+            ACTIVE_WEATHER
         };
 
         // Switch to lock if dome is closed.
         INDI::PropertySwitch DomePolicySP {2};
+
+        // Atmospheric refraction correction
+        INDI::PropertySwitch RefractionCorrectionSP {2};
+        enum
+        {
+            REFRACTION_CORRECTION_ON,
+            REFRACTION_CORRECTION_OFF
+        };
 
         // Switch for choosing between motion control by 4-way joystick or two separate axes
         INDI::PropertySwitch MotionControlModeTP {2};
