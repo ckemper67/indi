@@ -194,16 +194,28 @@ TEST(RefracAdj, MonotonicallyDecreasing)
 
 TEST(RefracModel, LibnovaMatchesErfa)
 {
-    static const double altitudes[] = {5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 70.0};
-    for (double alt : altitudes)
+    // Per-altitude tolerances reflect the genuine divergence between
+    // Bennett's empirical formula and ERFA's physics-based model.
+    // At 5 deg, ERFA's humidity/dispersion terms push the two apart by
+    // ~26 arcsec; above 10 deg the models converge rapidly.
+    struct { double alt; double tol_deg; } cases[] = {
+        { 5.0, 0.009},  // 32 arcsec -- Bennett vs ERFA diverge at low alt
+        {10.0, 0.003},  // 11 arcsec
+        {20.0, 0.001},  //  4 arcsec
+        {30.0, 0.001},
+        {45.0, 0.001},
+        {60.0, 0.001},
+        {70.0, 0.001},
+    };
+    for (auto &c : cases)
     {
-        double libnova_deg = ln_get_refraction_adj(alt, ATM_PRES, ATM_TEMP);
-        double erfa_deg    = erfaRefraction_deg(alt, ATM_PRES, ATM_TEMP);
-        // Tolerance: 0.5 arcminute (0.0083 deg); the two formulas differ slightly.
-        EXPECT_NEAR(libnova_deg, erfa_deg, 0.009)
-            << "alt=" << alt
+        double libnova_deg = ln_get_refraction_adj(c.alt, ATM_PRES, ATM_TEMP);
+        double erfa_deg    = erfaRefraction_deg(c.alt, ATM_PRES, ATM_TEMP);
+        EXPECT_NEAR(libnova_deg, erfa_deg, c.tol_deg)
+            << "alt=" << c.alt
             << "  libnova=" << libnova_deg * 60 << " arcmin"
-            << "  erfa=" << erfa_deg * 60 << " arcmin";
+            << "  erfa=" << erfa_deg * 60 << " arcmin"
+            << "  diff=" << (libnova_deg - erfa_deg) * 3600 << " arcsec";
     }
 }
 
@@ -257,8 +269,11 @@ TEST_P(PipelineVsErfa, RefractionAmount)
     ASSERT_GT(indi_hz.altitude, 0.0);
     double indi_delta = ln_get_refraction_adj(indi_hz.altitude, ATM_PRES, ATM_TEMP);
 
-    // Both should give the same refraction amount within 0.5 arcminute.
-    EXPECT_NEAR(indi_delta, erfa_delta, 0.009)
+    // Tolerance: 7 arcsec (0.002 deg). Stars are all above 20 deg where
+    // Bennett vs ERFA formula difference is < 1 arcsec; coordinate-transform
+    // differences between libnova and ERFA have negligible effect on the
+    // refraction amount at these altitudes.
+    EXPECT_NEAR(indi_delta, erfa_delta, 0.002)
         << s.name
         << "  INDI=" << indi_delta * 60 << " arcmin"
         << "  ERFA=" << erfa_delta * 60 << " arcmin"
@@ -445,9 +460,10 @@ TEST_F(IntegrationNewRaDec, SymmetricRoundTrip)
     scope.callNewRaDec(gotoRA, gotoDec, reportedRA, reportedDec);
 
     // After round-trip, EqNP should show ~original coordinates.
-    // Allow 1 arcminute tolerance (the JD may shift slightly between calls).
-    EXPECT_NEAR(reportedRA * 15.0, ra0 * 15.0, 0.017); // 1 arcmin in deg
-    EXPECT_NEAR(reportedDec,       dec0,        0.017);
+    // 18 arcsec tolerance accounts for the tiny JD drift between the forward
+    // refractionPipeline call and NewRaDec's internal getJulianDate() call.
+    EXPECT_NEAR(reportedRA * 15.0, ra0 * 15.0, 0.005);
+    EXPECT_NEAR(reportedDec,       dec0,        0.005);
 }
 
 int main(int argc, char **argv)
