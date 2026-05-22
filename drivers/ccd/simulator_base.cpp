@@ -1,6 +1,8 @@
 #include "simulator_base.h"
 #include <cmath>
 #include <sys/time.h>
+#include <libnova/julian_day.h>
+#include <libnova/lunar.h>
 
 // Central wavelength used for diffraction-floor FWHM calculation (mm).
 static constexpr float kCenterWavelengthMM = 550e-6f;
@@ -260,4 +262,77 @@ float SimulatorBase::CalcTimeLeft(timeval start, float req)
     double const timesince = (now.tv_sec  * 1000.0 + now.tv_usec  / 1000.0)
                            - (start.tv_sec * 1000.0 + start.tv_usec / 1000.0);
     return static_cast<float>(req - timesince / 1000.0);
+}
+
+void SimulatorBase::DrawMoon(INDI::CCDChip *targetChip, double cx, double cy, float exposure_time)
+{
+    if (m_ImageScaleX <= 0.0f || m_ImageScaleY <= 0.0f)
+        return;
+
+    double jd = ln_get_julian_from_sys();
+
+    // #11: compute separate pixel radii per axis so the disk stays circular on
+    // sky even when pixels are not square.
+    double const R_arcsec = ln_get_lunar_sdiam(jd);
+    double const Rx       = R_arcsec / m_ImageScaleX;
+    double const Ry       = R_arcsec / m_ImageScaleY;
+    if (Rx < 0.5 || Ry < 0.5)
+        return;
+
+    double const phase_rad      = ln_get_lunar_phase(jd) * M_PI / 180.0;
+    double const bright_limb_PA = ln_get_lunar_bright_limb(jd) * M_PI / 180.0;
+
+    // Bright-limb unit vector in sky arcsec coordinates (N up, E left after flip).
+    double const arg   = m_CameraTheta + bright_limb_PA;
+    double const bl_dx = -sin(arg);
+    double const bl_dy =  cos(arg);
+
+    // #13: hoist loop-invariant terminator factor.
+    double const cos_phase = cos(phase_rad);
+
+    // Full-moon surface brightness ~3.4 mag/arcsec^2; scale by pixel area.
+    double const pixel_area = m_ImageScaleX * m_ImageScaleY;
+    double pixel_flux = flux(3.4 - 2.5 * log10(pixel_area)) * exposure_time;
+
+    // #14: apply aperture scaling -- larger scopes collect more lunar surface flux.
+    double const apertureMM = ScopeInfoNP[APERTURE].getValue() > 0
+                                  ? ScopeInfoNP[APERTURE].getValue()
+                                  : snoopedAperture;
+    if (!std::isnan(apertureMM) && apertureMM > 0.0)
+        pixel_flux *= (apertureMM / m_RefApertureMM) * (apertureMM / m_RefApertureMM);
+
+    int const subX = targetChip->getSubX();
+    int const subY = targetChip->getSubY();
+    int const subW = subX + targetChip->getSubW();
+    int const subH = subY + targetChip->getSubH();
+    int const xlo  = std::max(subX, (int)(cx - Rx) - 1);
+    int const xhi  = std::min(subW, (int)(cx + Rx) + 2);
+    int const ylo  = std::max(subY, (int)(cy - Ry) - 1);
+    int const yhi  = std::min(subH, (int)(cy + Ry) + 2);
+
+    for (int iy = ylo; iy < yhi; iy++)
+    {
+        for (int ix = xlo; ix < xhi; ix++)
+        {
+            // #11: disk test in pixel-ellipse space (== sky-circle space).
+            double const u_pix = (ix - cx) / Rx;
+            double const v_pix = (iy - cy) / Ry;
+            if (u_pix * u_pix + v_pix * v_pix > 1.0)
+                continue;
+
+            // Illumination terminator: work in sky arcsec coords (normalized by R_arcsec)
+            // so the terminator shape is correct for non-square pixels.
+            double const u = (ix - cx) * m_ImageScaleX / R_arcsec;
+            double const v = (iy - cy) * m_ImageScaleY / R_arcsec;
+
+            double const lu  =  u * bl_dx + v * bl_dy;
+            double const lv  = -u * bl_dy + v * bl_dx;
+            double       lv2 = lv * lv;
+            if (lv2 > 1.0) lv2 = 1.0;
+            if (lu < cos_phase * sqrt(1.0 - lv2))
+                continue;
+
+            AddToPixel(targetChip, ix, iy, static_cast<int>(pixel_flux));
+        }
+    }
 }

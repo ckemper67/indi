@@ -44,6 +44,9 @@ class SimulatorBase : public INDI::CCD
         // Draw a Moffat PSF star centered at pixel (x, y), aperture-scaled.
         int DrawImageStar(INDI::CCDChip *targetChip, float mag, float x, float y, float exposure_time);
 
+        // Render the lunar disk at pixel (cx, cy) using libnova phase/position data.
+        void DrawMoon(INDI::CCDChip *targetChip, double cx, double cy, float exposure_time);
+
         // Propagate saturated-pixel overflow up/down the column.
         void BleedColumn(INDI::CCDChip *targetChip, int cx, int cy);
 

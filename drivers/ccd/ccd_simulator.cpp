@@ -24,6 +24,7 @@
 #include "locale_compat.h"
 
 #include <libnova/julian_day.h>
+#include <libnova/lunar.h>
 #include <libastro.h>
 
 #include <cmath>
@@ -228,7 +229,6 @@ bool CCDSim::initProperties()
 #else
     IDSnoopDevice(mount, "EQUATORIAL_EOD_COORD");
 #endif
-
     IDSnoopDevice(focuser, "FWHM");
 
     uint32_t cap = 0;
@@ -845,6 +845,43 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
                 int rc = DrawImageStar(targetChip, bsMag, ccdx, ccdy, exposure_time);
                 drawn += rc;
+            }
+
+            // Moon rendering
+            {
+                double jd = ln_get_julian_from_sys();
+                ln_equ_posn moonJNow;
+                ln_get_lunar_equ_coords(jd, &moonJNow);
+                INDI::IEquatorialCoordinates jnow { moonJNow.ra / 15.0, moonJNow.dec };
+                INDI::IEquatorialCoordinates j2000 { 0, 0 };
+                INDI::ObservedToJ2000(&jnow, jd, &j2000);
+
+                double phase_deg = ln_get_lunar_phase(jd);
+                double illum     = ln_get_lunar_disk(jd);
+                LOGF_INFO("Moon J2000 RA=%.4fh Dec=%.4f  phase=%.1f deg  illum=%.0f%%  field RA=%.4fh Dec=%.4f",
+                          j2000.rightascension, j2000.declination,
+                          phase_deg, illum * 100.0,
+                          currentRA, currentDE);
+
+                double srar  = j2000.rightascension * 15.0 * 0.0174532925;
+                double sdecr = j2000.declination        * 0.0174532925;
+                double denom = cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr);
+                if (denom > 0)
+                {
+                    double sx   = cos(sdecr) * sin(srar - rar) / denom;
+                    double sy   = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) / denom;
+                    double moon_cx = ccdW - (pa * sx + pb * sy + pc);
+                    double moon_cy =          pd * sx + pe * sy + pf;
+                    LOGF_INFO("Moon pixel center (%.1f, %.1f)  frame %dx%d  R=%.1f px",
+                              moon_cx, moon_cy,
+                              targetChip->getXRes(), targetChip->getYRes(),
+                              ln_get_lunar_sdiam(jd) / m_ImageScaleX);
+                    DrawMoon(targetChip, moon_cx, moon_cy, exposure_time);
+                }
+                else
+                {
+                    LOG_INFO("Moon: more than 90 deg from field center, not in frame");
+                }
             }
         }
 

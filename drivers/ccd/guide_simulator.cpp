@@ -52,6 +52,7 @@ which can simulate backlash to the guiding pulses. See its Dec Backlash paramete
 #include "locale_compat.h"
 
 #include <libnova/julian_day.h>
+#include <libnova/lunar.h>
 #include <libastro.h>
 
 #include <cmath>
@@ -797,6 +798,28 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
                 drawn += DrawImageStar(targetChip, bsMag, ccdx, ccdy, exposure_time);
             }
+
+            // Moon rendering
+            {
+                double jd = ln_get_julian_from_sys();
+                ln_equ_posn moonJNow;
+                ln_get_lunar_equ_coords(jd, &moonJNow);
+                INDI::IEquatorialCoordinates jnow { moonJNow.ra / 15.0, moonJNow.dec };
+                INDI::IEquatorialCoordinates j2000 { 0, 0 };
+                INDI::ObservedToJ2000(&jnow, jd, &j2000);
+
+                double srar  = j2000.rightascension * 15.0 * DEGREES_TO_RADIANS;
+                double sdecr = j2000.declination        * DEGREES_TO_RADIANS;
+                double denom = cos(decr) * cos(sdecr) * cos(srar - rar) + sin(decr) * sin(sdecr);
+                if (denom > 0)
+                {
+                    double sx      = cos(sdecr) * sin(srar - rar) / denom;
+                    double sy      = (sin(decr) * cos(sdecr) * cos(srar - rar) - cos(decr) * sin(sdecr)) / denom;
+                    double moon_cx = ccdW - (pa * sx + pb * sy + pc);
+                    double moon_cy =          pd * sx + pe * sy + pf;
+                    DrawMoon(targetChip, moon_cx, moon_cy, exposure_time);
+                }
+            }
         }
         //fprintf(stderr,"Got %d stars from %d lines drew %d\n",stars,lines,drawn);
 
@@ -1078,10 +1101,11 @@ void GuideSim::activeDevicesUpdated()
 
 bool GuideSim::ISSnoopDevice(XMLEle * root)
 {
+    const char * propName = findXMLAttValu(root, "name");
+
     // We try to snoop EQUATORIAL_PE first (true pointing with mount errors injected);
     // if not found we fall through to the regular EQUATORIAL_EOD_COORD snoop below.
 #ifdef USE_EQUATORIAL_PE
-    const char * propName = findXMLAttValu(root, "name");
     if (!strcmp(propName, "EQUATORIAL_PE"))
     {
         XMLEle * ep = nullptr;

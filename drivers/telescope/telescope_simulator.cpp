@@ -1200,6 +1200,7 @@ bool ScopeSim::updateLocation(double latitude, double longitude, double elevatio
     return true;
 }
 
+
 bool ScopeSim::updateMountAndPierSide()
 {
 #ifdef USE_SIM_TAB

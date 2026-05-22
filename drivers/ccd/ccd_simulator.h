@@ -97,6 +97,7 @@ protected:
 
     int DrawCcdFrame(INDI::CCDChip *targetChip);
 
+
     virtual IPState GuideNorth(uint32_t) override;
     virtual IPState GuideSouth(uint32_t) override;
     virtual IPState GuideEast(uint32_t) override;
@@ -187,8 +188,6 @@ protected:
     float m_PolarDrift { 0 };
 
     double m_LastTemperature {0};
-    // Camera rotation angle in radians, updated each frame from m_RotationOffset + RotatorAngle.
-    double m_CameraTheta {0.0};
 
     int streamPredicate {0};
     pthread_t primary_thread;

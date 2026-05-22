@@ -84,7 +84,6 @@ class ScopeSim : public INDI::Telescope, public INDI::GuiderInterface,
         virtual bool SetCurrentPark() override;
         virtual bool SetDefaultPark() override;
         virtual bool updateLocation(double latitude, double longitude, double elevation) override;
-
         // Home
         virtual IPState ExecuteHomeAction(TelescopeHomeAction action) override;
 

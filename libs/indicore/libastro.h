@@ -121,4 +121,4 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 */
 void ln_get_equ_nut(ln_equ_posn *posn, double jd, bool reverse = false);
 
-}
+} // namespace INDI
