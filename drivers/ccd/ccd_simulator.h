@@ -20,7 +20,7 @@
 
 #include <deque>
 
-#include "indiccd.h"
+#include "simulator_base.h"
 #include "indifilterinterface.h"
 
 /**
@@ -39,7 +39,7 @@
  * @author Gerry Rozema
  * @author Jasem Mutlaq
  */
-class CCDSim : public INDI::CCD, public INDI::FilterInterface
+class CCDSim : public SimulatorBase, public INDI::FilterInterface
 {
 public:
 
@@ -97,9 +97,6 @@ protected:
 
     int DrawCcdFrame(INDI::CCDChip *targetChip);
 
-    int DrawImageStar(INDI::CCDChip *targetChip, float, float, float, float ExposureTime);
-    int AddToPixel(INDI::CCDChip *targetChip, int, int, int);
-
     virtual IPState GuideNorth(uint32_t) override;
     virtual IPState GuideSouth(uint32_t) override;
     virtual IPState GuideEast(uint32_t) override;
@@ -124,15 +121,12 @@ protected:
 
 protected:
 
-    float CalcTimeLeft(timeval, float);
     bool watchDirectory();
     bool loadNextImage();
     bool setupParameters();
 
     // Turns on/off Bayer RGB simulation.
     void setBayerEnabled(bool onOff);
-
-    double flux(double magnitude) const;
 
     double TemperatureRequest { 0 };
 
@@ -152,15 +146,7 @@ protected:
     bool ShowStarField { true };
     int m_Bias { 1500 };
     int m_MaxNoise { 20 };
-    int m_MaxVal { 65000 };
-    int maxpix { 0 };
-    int minpix { 65000 };
     float m_SkyGlow { 40 };
-    float m_LimitingMag { 11.5 };
-    float m_SaturationMag { 2 };
-    float seeing { 3.5 };
-    float ImageScalex { 1.0 };
-    float ImageScaley { 1.0 };
     //  An oag is offset this much from center of scope position (arcminutes)
     float m_OAGOffset { 0 };
     float m_TimeFactor { 1 };

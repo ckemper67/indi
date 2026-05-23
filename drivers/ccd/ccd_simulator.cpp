@@ -396,23 +396,6 @@ bool CCDSim::AbortGuideExposure()
     return true;
 }
 
-float CCDSim::CalcTimeLeft(timeval start, float req)
-{
-    double timesince;
-    double timeleft;
-    struct timeval now
-    {
-        0, 0
-    };
-    gettimeofday(&now, nullptr);
-
-    timesince =
-        (double)(now.tv_sec * 1000.0 + now.tv_usec / 1000) - (double)(start.tv_sec * 1000.0 + start.tv_usec / 1000);
-    timesince = timesince / 1000;
-    timeleft  = req - timesince;
-    return timeleft;
-}
-
 void CCDSim::TimerHit()
 {
     uint32_t nextTimer = getCurrentPollingPeriod();
@@ -523,15 +506,6 @@ void CCDSim::TimerHit()
 
 
     SetTimer(nextTimer);
-}
-
-double CCDSim::flux(double mag) const
-{
-    // The limiting magnitude provides zero ADU whatever the exposure
-    // The saturation magnitude provides max ADU in one second
-    double const z = m_LimitingMag;
-    double const k = 2.5 * log10(m_MaxVal) / (m_LimitingMag - m_SaturationMag);
-    return pow(10, (z - mag) * k / 2.5);
 }
 
 int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
@@ -645,8 +619,8 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         nheight = targetChip->getYRes();
         pf      = nheight / 2;
 
-        ImageScalex = Scalex;
-        ImageScaley = Scaley;
+        m_ImageScaleX = Scalex;
+        m_ImageScaleY = Scaley;
 
 #ifdef USE_EQUATORIAL_PE
         if (usePE)
@@ -863,10 +837,10 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                     float const sx = nwidth / 2 - x;
 
                     // Vignetting parameter in arcsec
-                    float const vig = std::min(nwidth, nheight) * ImageScalex;
+                    float const vig = std::min(nwidth, nheight) * m_ImageScaleX;
 
                     // Squared distance to center in arcsec (need to make this account for actual pixel size)
-                    float const dc2 = sx * sx * ImageScalex * ImageScalex + sy * sy * ImageScaley * ImageScaley;
+                    float const dc2 = sx * sx * m_ImageScaleX * m_ImageScaleX + sy * sy * m_ImageScaleY * m_ImageScaleY;
 
                     // Gaussian falloff to the edges of the frame
                     float const fa = exp(-2.0 * 0.7 * dc2 / (vig * vig));
@@ -877,8 +851,8 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                     // Clamp to limits, store minmax
                     if (fp > m_MaxVal) fp = m_MaxVal;
                     if (fp < pt[0]) fp = pt[0];
-                    if (fp > maxpix) maxpix = fp;
-                    if (fp < minpix) minpix = fp;
+                    if (fp > m_MaxPix) m_MaxPix = fp;
+                    if (fp < m_MinPix) m_MinPix = fp;
 
                     // And put it back
                     pt[0] = fp;
@@ -925,114 +899,6 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         }
     }
     return 0;
-}
-
-int CCDSim::DrawImageStar(INDI::CCDChip * targetChip, float mag, float x, float y, float exposure_time)
-{
-    int sx, sy;
-    int drew     = 0;
-    //int boxsizex = 5;
-    int boxsizey = 5;
-    float flux;
-
-    int subX = targetChip->getSubX();
-    int subY = targetChip->getSubY();
-    int subW = targetChip->getSubW() + subX;
-    int subH = targetChip->getSubH() + subY;
-
-    if ((x < subX) || (x > subW || (y < subY) || (y > subH)))
-    {
-        //  this star is not on the ccd frame anyways
-        return 0;
-    }
-
-    //  calculate flux from our zero point and gain values
-    flux = this->flux(mag);
-
-    //  ok, flux represents one second now
-    //  scale up linearly for exposure time
-    flux = flux * exposure_time;
-
-    //  we need a box size that gives a radius at least 3 times fwhm
-    //qx       = seeing / ImageScalex;
-    //qx       = qx * 3;
-    //boxsizex = (int)qx;
-    //boxsizex++;
-    auto qx = seeing / ImageScaley;
-    qx = qx * 3;
-    boxsizey = static_cast<int>(qx);
-    boxsizey++;
-
-    //IDLog("BoxSize %d %d\n",boxsizex,boxsizey);
-
-    for (sy = -boxsizey; sy <= boxsizey; sy++)
-    {
-        for (sx = -boxsizey; sx <= boxsizey; sx++)
-        {
-            int rc;
-
-            // Squared distance to center in arcsec (need to make this account for actual pixel size)
-            float const dc2 = sx * sx * ImageScalex * ImageScalex + sy * sy * ImageScaley * ImageScaley;
-
-            // Use a gaussian of unitary integral, scale it with the source flux
-            // f(x) = 1/(sqrt(2*pi)*sigma) * exp( -x² / (2*sigma²) )
-            // FWHM = 2*sqrt(2*log(2))*sigma => sigma = seeing/(2*sqrt(2*log(2)))
-            float const sigma = seeing / ( 2 * sqrt(2 * log(2)));
-            float const fa = 1 / (sigma * sqrt(2 * 3.1416)) * exp( -dc2 / (2 * sigma * sigma));
-
-            // The source contribution is the gaussian value, stretched by seeing/FWHM
-            float fp = fa * flux;
-
-            if (fp < 0)
-                fp = 0;
-
-            rc = AddToPixel(targetChip, x + sx, y + sy, fp);
-            if (rc != 0)
-                drew = 1;
-        }
-    }
-    return drew;
-}
-
-int CCDSim::AddToPixel(INDI::CCDChip * targetChip, int x, int y, int val)
-{
-    int nwidth  = targetChip->getSubW();
-    int nheight = targetChip->getSubH();
-
-    x -= targetChip->getSubX();
-    y -= targetChip->getSubY();
-
-    int drew = 0;
-    if (x >= 0)
-    {
-        if (x < nwidth)
-        {
-            if (y >= 0)
-            {
-                if (y < nheight)
-                {
-                    unsigned short * pt;
-                    int newval;
-                    drew++;
-
-                    pt = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
-
-                    pt += (y * nwidth);
-                    pt += x;
-                    newval = pt[0];
-                    newval += val;
-                    if (newval > m_MaxVal)
-                        newval = m_MaxVal;
-                    if (newval > maxpix)
-                        maxpix = newval;
-                    if (newval < minpix)
-                        minpix = newval;
-                    pt[0] = newval;
-                }
-            }
-        }
-    }
-    return drew;
 }
 
 IPState CCDSim::GuideNorth(uint32_t v)
@@ -1320,7 +1186,7 @@ bool CCDSim::ISSnoopDevice(XMLEle * root)
     if (IUSnoopNumber(root, &FWHMNP) == 0)
     {
         // we calculate the FWHM and do not snoop it from the focus simulator
-        // seeing = FWHMNP.np[0].value;
+        // m_Seeing = FWHMNP.np[0].value;
         return true;
     }
 
@@ -1345,7 +1211,7 @@ bool CCDSim::ISSnoopDevice(XMLEle * root)
                 // limit to +/- 10
                 double ticks = 20 * (FocuserPos - focus) / max;
 
-                seeing = 0.5625 * ticks * ticks + optimalFWHM;
+                m_Seeing = 0.5625 * ticks * ticks + optimalFWHM;
                 return true;
             }
         }

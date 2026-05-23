@@ -18,8 +18,7 @@
 
 #pragma once
 
-#include "indiccd.h"
-#include "indifilterinterface.h"
+#include "simulator_base.h"
 #include "indipropertyswitch.h"
 #include "fitskeyword.h"
 
@@ -39,7 +38,7 @@
  * @author Gerry Rozema
  * @author Jasem Mutlaq
  */
-class GuideSim : public INDI::CCD
+class GuideSim : public SimulatorBase
 {
     public:
 
@@ -73,10 +72,6 @@ class GuideSim : public INDI::CCD
 
         int DrawCcdFrame(INDI::CCDChip *targetChip);
 
-        int DrawImageStar(INDI::CCDChip *targetChip, float, float, float, float ExposureTime,
-                          double zeroPointK, double zeroPointZ);
-        int AddToPixel(INDI::CCDChip *targetChip, int, int, int);
-
         virtual IPState GuideNorth(uint32_t) override;
         virtual IPState GuideSouth(uint32_t) override;
         virtual IPState GuideEast(uint32_t) override;
@@ -93,7 +88,6 @@ class GuideSim : public INDI::CCD
 
     private:
 
-        float CalcTimeLeft(timeval, float);
         bool SetupParms();
 
         // Turns on/off Bayer RGB simulation.
@@ -112,15 +106,7 @@ class GuideSim : public INDI::CCD
         bool m_ShowStarField { true };
         int m_Bias { 1500 };
         int m_MaxNoise { 20 };
-        int m_MaxVal { 65000 };
-        int m_MaxPix { 0 };
-        int m_MinPix { 65000 };
         float m_SkyGlow { 40 };
-        float m_LimitingMag { 11.5 };
-        float m_SaturationMag { 2 };
-        float m_Seeing { 3.5 };
-        float m_ImageScaleX { 1.0 };
-        float m_ImageScaleY { 1.0 };
         //  An oag is offset this much from center of scope position (arcminutes)
         float m_OAGoffset { 0 };
         float m_TimeFactor { 1 };
