@@ -335,23 +335,6 @@ bool GuideSim::AbortExposure()
     return true;
 }
 
-float GuideSim::CalcTimeLeft(timeval start, float req)
-{
-    double timesince;
-    double timeleft;
-    struct timeval now
-    {
-        0, 0
-    };
-    gettimeofday(&now, nullptr);
-
-    timesince =
-        (double)(now.tv_sec * 1000.0 + now.tv_usec / 1000) - (double)(start.tv_sec * 1000.0 + start.tv_usec / 1000);
-    timesince = timesince / 1000;
-    timeleft  = req - timesince;
-    return timeleft;
-}
-
 void GuideSim::TimerHit()
 {
     uint32_t nextTimer = getCurrentPollingPeriod();
@@ -592,12 +575,6 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         //  and a limitingmag produces a one adu level in one second
         //  solve for zero point and system gain
 
-        double zeroPointK = (m_SaturationMag - m_LimitingMag) / ((-2.5 * log(m_MaxVal)) - (-2.5 * log(1.0 / 2.0)));
-        double zeroPointZ = m_SaturationMag - zeroPointK * (-2.5 * log(m_MaxVal));
-        //zeroPointZ = zeroPointZ + m_SaturationMag;
-
-        //IDLog("K=%4.2f  Z=%4.2f\n",zeroPointK,zeroPointZ);
-
         //  Should probably do some math here to figure out the dimmest
         //  star we can see on this exposure
         //  and only fetch to that magnitude
@@ -767,7 +744,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                         // Invert horizontally and transform CW to CCW (see above)
                         ccdx = ccdW - ccdx;
 
-                        rc = DrawImageStar(targetChip, mag, ccdx, ccdy, exposure_time, zeroPointK, zeroPointZ);
+                        rc = DrawImageStar(targetChip, mag, ccdx, ccdy, exposure_time);
                         drawn += rc;
                         if (rc == 1)
                         {
@@ -809,7 +786,7 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
             //fprintf(stderr,"Using glow %4.2f\n",glow);
 
-            skyflux = pow(10, ((glow - zeroPointZ) * zeroPointK / -2.5));
+            skyflux = static_cast<float>(flux(glow));
             //  ok, flux represents one second now
             //  scale up linearly for exposure time
             skyflux = skyflux * exposure_time;
@@ -904,92 +881,6 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         }
     }
     return 0;
-}
-
-int GuideSim::DrawImageStar(INDI::CCDChip * targetChip, float mag, float x, float y, float exposure_time, double zeroPointK,
-                            double zeroPointZ)
-{
-    const int subX = targetChip->getSubX();
-    const int subY = targetChip->getSubY();
-    const int subW = targetChip->getSubW() + subX;
-    const int subH = targetChip->getSubH() + subY;
-
-    if ((x < subX) || (x > subW || (y < subY) || (y > subH)))
-    {
-        //  this star is not on the ccd frame anyways
-        return 0;
-    }
-
-    //  Calculate flux from our zero point and gain values
-    //  Mag represents one second, scale up linearly for exposure time.
-    const double flux = exposure_time * pow(10, ((mag - zeroPointZ) * zeroPointK / -2.5));
-
-    const double seeingSquared = m_Seeing * m_Seeing;
-    const double pixelPartX = x - static_cast<int>(x);
-    const double pixelPartY = y - static_cast<int>(y);
-
-    int drew     = 0;
-    const int boxSize = static_cast<int>(3 * m_Seeing / m_ImageScaleY) + 1;
-    for (int sy = -boxSize; sy <= boxSize; sy++)
-    {
-        for (int sx = -boxSize; sx <= boxSize; sx++)
-        {
-            //  Need to make this account for actual pixel size
-            const double dx = m_ImageScaleX * (sx - pixelPartX);
-            const double dy = m_ImageScaleY * (sy - pixelPartY);
-            //  Distance from center (arcseconds).
-            const float distanceSquared = dx * dx  + dy * dy;
-            float pixelFlux = flux * exp(-2.0 * 0.7 * distanceSquared / seeingSquared);
-
-            if (pixelFlux < 0)
-                pixelFlux = 0;
-
-            if (AddToPixel(targetChip, x + sx, y + sy, pixelFlux) != 0)
-                drew = 1;
-        }
-    }
-    return drew;
-}
-
-int GuideSim::AddToPixel(INDI::CCDChip * targetChip, int x, int y, int val)
-{
-    int nwidth  = targetChip->getSubW();
-    int nheight = targetChip->getSubH();
-
-    x -= targetChip->getSubX();
-    y -= targetChip->getSubY();
-
-    int drew = 0;
-    if (x >= 0)
-    {
-        if (x < nwidth)
-        {
-            if (y >= 0)
-            {
-                if (y < nheight)
-                {
-                    unsigned short * pt;
-                    int newval;
-                    drew++;
-
-                    pt = reinterpret_cast<uint16_t *>(targetChip->getFrameBuffer());
-
-                    pt += (y * nwidth);
-                    pt += x;
-                    newval = pt[0];
-                    newval += val;
-                    if (newval > m_MaxVal)
-                        newval = m_MaxVal;
-                    if (newval > m_MaxPix)
-                        m_MaxPix = newval;
-                    if (newval < m_MinPix)
-                        m_MinPix = newval;
-                    pt[0] = newval;
-                }
-            }
-        }
-    }
-    return drew;
 }
 
 IPState GuideSim::GuideNorth(uint32_t v)

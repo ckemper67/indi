@@ -1,5 +1,6 @@
 # ########## CCD Simulator ##############
 SET(ccdsimulator_SRC
+    simulator_base.cpp
     ccd_simulator.cpp)
 
 add_executable(indi_simulator_ccd ${ccdsimulator_SRC})
@@ -9,6 +10,7 @@ install(TARGETS indi_simulator_ccd RUNTIME DESTINATION bin)
 
 # ########## Guide Simulator ##############
 SET(guidesimulator_SRC
+    simulator_base.cpp
     guide_simulator.cpp)
 
 add_executable(indi_simulator_guide ${guidesimulator_SRC})
