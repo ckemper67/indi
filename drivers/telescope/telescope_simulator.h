@@ -41,7 +41,7 @@
  * @author Jasem Mutlaq
  */
 class ScopeSim : public INDI::Telescope, public INDI::GuiderInterface,
-                 public INDI::AlignmentSubsystem::AlignmentSubsystemForDrivers
+    public INDI::AlignmentSubsystem::AlignmentSubsystemForDrivers
 {
     public:
         ScopeSim();
@@ -138,6 +138,13 @@ class ScopeSim : public INDI::Telescope, public INDI::GuiderInterface,
         {
             GUIDE_RATE_WE,
             GUIDE_RATE_NS
+        };
+
+        INDI::PropertyNumber ScopeInfoNP {2};
+        enum
+        {
+            SCOPE_APERTURE,
+            SCOPE_FOCAL_LENGTH
         };
 
         double m_Home[2] = {0, 0};
