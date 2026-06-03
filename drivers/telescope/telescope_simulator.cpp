@@ -150,6 +150,10 @@ bool ScopeSim::initProperties()
     EqPENP[PE_DEC].fill("DEC_PE", "DEC (dd:mm:ss)", "%010.6m", -90, 90, 0, 0);
     EqPENP.fill(getDeviceName(), "EQUATORIAL_PE", "True Pointing", MAIN_CONTROL_TAB, IP_RO, 0, IPS_IDLE);
 
+    ScopeInfoNP[SCOPE_APERTURE].fill("TELESCOPE_APERTURE", "Aperture (mm)", "%g", 10, 5000, 0, 80);
+    ScopeInfoNP[SCOPE_FOCAL_LENGTH].fill("TELESCOPE_FOCAL_LENGTH", "Focal Length (mm)", "%g", 10, 10000, 0, 480);
+    ScopeInfoNP.fill(getDeviceName(), "TELESCOPE_INFO", "Scope Info", OPTIONS_TAB, IP_RW, 60, IPS_OK);
+
     return true;
 }
 
@@ -264,11 +268,14 @@ bool ScopeSim::updateProperties()
 #endif
 
         defineProperty(EqPENP);
+        defineProperty(ScopeInfoNP);
+        ScopeInfoNP.load();
         SetAlignmentSubsystemActive(true);
     }
     else
     {
         deleteProperty(EqPENP);
+        deleteProperty(ScopeInfoNP);
         deleteProperty(GuideRateNP);
     }
 
@@ -735,6 +742,15 @@ bool ScopeSim::ISNewNumber(const char *dev, const char *name, double values[], c
             return true;
         }
 
+        if (ScopeInfoNP.isNameMatch(name))
+        {
+            ScopeInfoNP.update(values, names, n);
+            ScopeInfoNP.setState(IPS_OK);
+            ScopeInfoNP.apply();
+            saveConfig(ScopeInfoNP);
+            return true;
+        }
+
 #ifdef USE_SIM_TAB
         if (mountModelNP.isNameMatch(name))
         {
@@ -1178,6 +1194,7 @@ bool ScopeSim::saveConfigItems(FILE *fp)
 
 #ifdef USE_SIM_TAB
     GuideRateNP.save(fp);
+    ScopeInfoNP.save(fp);
     MountTypeSP.save(fp);
     simPierSideSP.save(fp);
     mountModelNP.save(fp);
