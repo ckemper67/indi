@@ -31,7 +31,11 @@ using namespace INDI::AlignmentSubsystem;
 #include <memory>
 
 // We declare an auto pointer to ScopeSim.
+// Define NO_DEVICE_SINGLETON in test targets to suppress this static instance;
+// test code provides its own mock constructors instead.
+#ifndef NO_DEVICE_SINGLETON
 static std::unique_ptr<ScopeSim> telescope_sim(new ScopeSim());
+#endif
 
 #define RA_AXIS     0
 #define DEC_AXIS    1

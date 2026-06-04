@@ -38,7 +38,9 @@
 static pthread_cond_t cv         = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t condMutex = PTHREAD_MUTEX_INITIALIZER;
 
+#ifndef NO_DEVICE_SINGLETON
 static std::unique_ptr<CCDSim> ccdsim(new CCDSim());
+#endif
 
 CCDSim::CCDSim() : INDI::FilterInterface(this)
 {
