@@ -26,26 +26,24 @@
 
 // TestBus: in-process replacement for indiserver snoop routing.
 //
-// Serializes a real driver property to INDI XML using IUUserIO, parses the
-// result with LilXML, and delivers it directly to the registered consumer
-// devices by calling their ISSnoopDevice() member.  The global ISSnoopDevice()
-// function (and its devicesLock) is deliberately NOT used, so:
+// Serializes a real driver property to INDI XML using IUUserIO, feeds the bytes
+// directly into LilXML, and delivers each complete element to the registered
+// consumer devices by calling their ISSnoopDevice() member.  The global
+// ISSnoopDevice() function (and its devicesLock) is deliberately NOT used, so:
 //   - no lock-inversion deadlock is possible, even with driver background threads
 //   - ghost devices (static singletons) never receive stray deliveries
 //   - test intent is explicit: only watched consumers receive each delivery
 //
 // Typical usage:
-//   MockScopeDriver scope("MockScope");
-//   MockCCDDriver   ccd;
-//   ccd.setSnoopedTelescope("MockScope");
-//   bus.watch(ccd);
+//   TestScopeSim scope("TestScope");
+//   TestCCDSim   ccd;
+//   bus.snoop(ccd, scope, [&]{ ccd.setSnoopedTelescope(scope.getDeviceName()); });
 //   scope.EqNP[AXIS_RA].setValue(5.5);
-//   auto t = bus.deliver(scope.EqNP);
-//   ASSERT_EQ(t.parsed_messages, 1) << t.parse_error;
+//   ASSERT_TRUE(bus.deliver(scope.EqNP));
 //   EXPECT_DOUBLE_EQ(ccd.RA, 5.5);
 //
-// Publisher mocks should override ISSnoopDevice to return false so they do not
-// try to process deliveries intended for consumer mocks:
+// Publisher drivers should override ISSnoopDevice to return false so they do not
+// try to process deliveries intended for consumer drivers:
 //   bool ISSnoopDevice(XMLEle *) override { return false; }
 //
 // Threading: deliver() is safe to call while driver background threads are
@@ -56,6 +54,8 @@
 
 // Outcome of a single deliver() call.  parsed_messages == 1 is the expected
 // normal case; 0 means the XML did not parse or produced no complete element.
+// last_xml is capped at 4KB; sufficient for all non-BLOB properties in full,
+// and for the XML envelope of BLOB properties (base64 content is truncated).
 struct DispatchTrace
 {
     int         parsed_messages = 0;
@@ -105,46 +105,115 @@ public:
     // ---------------------------------------------------------------------------
     DispatchTrace deliver(const INumberVectorProperty *nvp)
     {
-        return dispatch_xml(capture([nvp](const userio *io, void *user)
+        return stream_deliver([nvp](const userio *io, void *user)
         {
             s_set_number(io, user, nvp);
-        }));
+        });
     }
 
     DispatchTrace deliver(const ISwitchVectorProperty *svp)
     {
-        return dispatch_xml(capture([svp](const userio *io, void *user)
+        return stream_deliver([svp](const userio *io, void *user)
         {
             s_set_switch(io, user, svp);
-        }));
+        });
     }
 
     DispatchTrace deliver(const ITextVectorProperty *tvp)
     {
-        return dispatch_xml(capture([tvp](const userio *io, void *user)
+        return stream_deliver([tvp](const userio *io, void *user)
         {
             s_set_text(io, user, tvp);
-        }));
+        });
     }
 
     DispatchTrace deliver(const ILightVectorProperty *lvp)
     {
-        return dispatch_xml(capture([lvp](const userio *io, void *user)
+        return stream_deliver([lvp](const userio *io, void *user)
         {
             s_set_light(io, user, lvp);
-        }));
+        });
     }
 
     DispatchTrace deliver(const IBLOBVectorProperty *bvp)
     {
-        return dispatch_xml(capture([bvp](const userio *io, void *user)
+        return stream_deliver([bvp](const userio *io, void *user)
         {
             s_set_blob(io, user, bvp);
-        }));
+        });
     }
 
 private:
+    static constexpr size_t XML_CAP = 4096;
+
     std::vector<INDI::DefaultDevice *> consumers_;
+
+    struct StreamState
+    {
+        LilXML                                   *lp;
+        const std::vector<INDI::DefaultDevice *> *consumers;
+        DispatchTrace                            *trace;
+        bool                                      aborted = false;
+        char                                      errmsg[256];
+
+        StreamState() : lp(nullptr), consumers(nullptr), trace(nullptr)
+        {
+            errmsg[0] = '\0';
+        }
+    };
+
+    // userio write callback: feeds bytes directly into LilXML and dispatches
+    // each complete element to consumers.  Tees into trace.last_xml up to
+    // XML_CAP bytes so parse errors include enough context for diagnosis.
+    static ssize_t s_write(void *user, const void *ptr, size_t n)
+    {
+        auto *st = static_cast<StreamState *>(user);
+        if (st->aborted) return 0;
+        const char *p = static_cast<const char *>(ptr);
+
+        std::string &lx = st->trace->last_xml;
+        if (lx.size() < XML_CAP)
+            lx.append(p, std::min(n, XML_CAP - lx.size()));
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            XMLEle *root = readXMLEle(st->lp, (unsigned char)p[i], st->errmsg);
+            if (root)
+            {
+                ++st->trace->parsed_messages;
+                for (auto *dev : *st->consumers)
+                    dev->ISSnoopDevice(root);
+                delXMLEle(root);
+            }
+            else if (st->errmsg[0])
+            {
+                st->trace->parse_error = st->errmsg;
+                ADD_FAILURE() << "TestBus parse error: " << st->errmsg
+                              << "\nXML was:\n" << lx;
+                st->aborted = true;
+                return 0;
+            }
+        }
+        return static_cast<ssize_t>(n);
+    }
+
+    // userio vprintf callback: formats into a temporary string, then routes
+    // through s_write so the same LilXML feed and tee logic applies.
+    // These calls carry only small XML attribute values; the large base64 BLOB
+    // content goes through s_write directly via userio_write.
+    static int s_vprintf(void *user, const char *fmt, va_list ap)
+    {
+        va_list ap2;
+        va_copy(ap2, ap);
+        int needed = vsnprintf(nullptr, 0, fmt, ap2);
+        va_end(ap2);
+        if (needed < 0) return needed;
+        std::string tmp(needed + 1, '\0');
+        vsnprintf(tmp.data(), needed + 1, fmt, ap);
+        tmp.resize(needed);
+        s_write(user, tmp.data(), needed);
+        return needed;
+    }
 
     // Variadic trampolines: give IUUserIO a valid va_list while passing
     // fmt=nullptr so the message attribute is omitted entirely.
@@ -188,65 +257,24 @@ private:
         va_end(ap);
     }
 
-    // userio callbacks that append to a std::string buffer
-    static ssize_t s_write(void *user, const void *ptr, size_t n)
+    DispatchTrace stream_deliver(std::function<void(const userio *, void *)> fn)
     {
-        static_cast<std::string *>(user)->append(static_cast<const char *>(ptr), n);
-        return static_cast<ssize_t>(n);
-    }
+        DispatchTrace trace;
+        StreamState st;
+        st.lp        = newLilXML();
+        st.consumers = &consumers_;
+        st.trace     = &trace;
 
-    static int s_vprintf(void *user, const char *fmt, va_list ap)
-    {
-        va_list ap2;
-        va_copy(ap2, ap);
-        int needed = vsnprintf(nullptr, 0, fmt, ap2);
-        va_end(ap2);
-        if (needed < 0) return needed;
-        std::string &s = *static_cast<std::string *>(user);
-        size_t old = s.size();
-        s.resize(old + needed + 1);
-        vsnprintf(s.data() + old, needed + 1, fmt, ap);
-        s.resize(old + needed);
-        return needed;
-    }
-
-    std::string capture(std::function<void(const userio *, void *)> fn)
-    {
-        std::string buf;
         userio io;
         io.write    = s_write;
         io.vprintf  = s_vprintf;
         io.joinbuff = nullptr;  // BLOBs are base64-encoded inline; no unix socket binary attachment needed
-        userio_xmlv1(&io, &buf);
-        fn(&io, &buf);
-        return buf;
-    }
 
-    DispatchTrace dispatch_xml(const std::string &xml)
-    {
-        DispatchTrace trace;
-        trace.last_xml = xml;
-        LilXML *lp = newLilXML();
-        char errmsg[256] = {0};
-        for (char c : xml)
-        {
-            XMLEle *root = readXMLEle(lp, c, errmsg);
-            if (root)
-            {
-                ++trace.parsed_messages;
-                for (auto *dev : consumers_)
-                    dev->ISSnoopDevice(root);
-                delXMLEle(root);
-            }
-            else if (errmsg[0])
-            {
-                trace.parse_error = errmsg;
-                ADD_FAILURE() << "TestBus parse error: " << errmsg
-                              << "\nXML was:\n" << xml;
-                break;
-            }
-        }
-        delLilXML(lp);
+        userio_xmlv1(&io, &st);
+        if (!st.aborted)
+            fn(&io, &st);
+
+        delLilXML(st.lp);
         return trace;
     }
 };
