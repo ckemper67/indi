@@ -216,7 +216,7 @@ private:
         userio io;
         io.write    = s_write;
         io.vprintf  = s_vprintf;
-        io.joinbuff = nullptr;
+        io.joinbuff = nullptr;  // BLOBs are base64-encoded inline; no unix socket binary attachment needed
         userio_xmlv1(&io, &buf);
         fn(&io, &buf);
         return buf;
