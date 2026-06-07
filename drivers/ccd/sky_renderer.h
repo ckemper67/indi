@@ -5,11 +5,15 @@
 // All fields have sensible defaults; update via setConfig() when INDI properties change.
 struct RenderConfig
 {
-    int   maxVal        = 65000;    // ADU ceiling
-    float limitingMag   = 11.5f;    // magnitude that gives 1 ADU/s at reference aperture
-    float saturationMag = 2.0f;     // magnitude that saturates in 1 s
-    float seeing        = 3.5f;     // atmospheric FWHM (arcsec)
-    float skyGlow       = 19.5f;    // sky background brightness (magnitudes)
+    int   maxVal           = 65000;    // ADU ceiling
+    float limitingMag      = 11.5f;    // magnitude that gives 1 ADU/s at reference aperture
+    float saturationMag    = 2.0f;     // magnitude that saturates in 1 s
+    float seeing           = 3.5f;     // atmospheric FWHM (arcsec)
+    float skyGlow          = 19.5f;    // sky background brightness (magnitudes)
+    float apertureMM       = 0.0f;    // telescope aperture diameter; 0 = unknown
+    float refApertureMM    = 100.0f;  // reference aperture for flux calibration
+    bool  diffractionSpikes = false;  // render 4-pointed spider-vane spikes
+    float cameraTheta      = 0.0f;   // camera rotation in radians (spike orientation)
 };
 
 // SkyRenderer renders a synthetic sky scene into an INDI::CCDChip frame buffer.
@@ -83,5 +87,6 @@ class SkyRenderer
 
         double flux(double mag) const;
         int    addToPixel(INDI::CCDChip *, int x, int y, int val);
+        void   bleedColumn(INDI::CCDChip *, int cx, int cy);
         void   drawSkyGlow(INDI::CCDChip *, float exp_s);
 };

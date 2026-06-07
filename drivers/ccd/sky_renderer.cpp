@@ -1,4 +1,5 @@
 #include "sky_renderer.h"
+#include "bright_stars_catalog.h"
 #include "indicom.h"
 #include "locale_compat.h"
 
@@ -6,6 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+
+static constexpr float kCenterWavelengthMM = 550e-6f;
+static constexpr float kMinApertureMM = 5.0f;
 
 double SkyRenderer::flux(double mag) const
 {
@@ -31,8 +35,8 @@ int SkyRenderer::addToPixel(INDI::CCDChip *chip, int x, int y, int val)
     pt += y * nwidth + x;
 
     int newval = static_cast<int>(pt[0]) + val;
-    if (newval > m_Cfg.maxVal)
-        newval = m_Cfg.maxVal;
+    if (newval > 65535)
+        newval = 65535;
     if (newval > m_MaxPix)
         m_MaxPix = newval;
     if (newval < m_MinPix)
@@ -42,8 +46,68 @@ int SkyRenderer::addToPixel(INDI::CCDChip *chip, int x, int y, int val)
     return 1;
 }
 
+void SkyRenderer::bleedColumn(INDI::CCDChip *chip, int cx, int cy)
+{
+    int const nwidth  = chip->getSubW();
+    int const nheight = chip->getSubH();
+    int const ix      = cx - chip->getSubX();
+    int const iy      = cy - chip->getSubY();
+
+    if (ix < 0 || ix >= nwidth || iy < 0 || iy >= nheight)
+        return;
+
+    uint16_t *buf    = reinterpret_cast<uint16_t *>(chip->getFrameBuffer());
+    uint16_t *center = buf + iy * nwidth + ix;
+
+    if (static_cast<int>(*center) <= m_Cfg.maxVal)
+        return;
+
+    int const total = static_cast<int>(*center) - m_Cfg.maxVal;
+    *center = static_cast<uint16_t>(m_Cfg.maxVal);
+
+    int carry = (total + 1) / 2;
+    for (int py = iy - 1; py >= 0 && carry > 0; py--)
+    {
+        uint16_t *p = buf + py * nwidth + ix;
+        int newval  = static_cast<int>(*p) + carry;
+        if (newval > m_Cfg.maxVal)
+        {
+            carry  = newval - m_Cfg.maxVal;
+            newval = m_Cfg.maxVal;
+        }
+        else
+        {
+            carry = 0;
+        }
+        if (newval > m_MaxPix) m_MaxPix = newval;
+        *p = static_cast<uint16_t>(newval);
+    }
+
+    carry = total / 2;
+    for (int py = iy + 1; py < nheight && carry > 0; py++)
+    {
+        uint16_t *p = buf + py * nwidth + ix;
+        int newval  = static_cast<int>(*p) + carry;
+        if (newval > m_Cfg.maxVal)
+        {
+            carry  = newval - m_Cfg.maxVal;
+            newval = m_Cfg.maxVal;
+        }
+        else
+        {
+            carry = 0;
+        }
+        if (newval > m_MaxPix) m_MaxPix = newval;
+        *p = static_cast<uint16_t>(newval);
+    }
+}
+
 int SkyRenderer::drawImageStar(INDI::CCDChip *chip, float mag, float x, float y, float exp_s)
 {
+    if (m_ImageScaleX <= 0.0f || m_ImageScaleY <= 0.0f ||
+            !std::isfinite(m_ImageScaleX) || !std::isfinite(m_ImageScaleY))
+        return 0;
+
     int drew = 0;
 
     int const subX = chip->getSubX();
@@ -51,34 +115,120 @@ int SkyRenderer::drawImageStar(INDI::CCDChip *chip, float mag, float x, float y,
     int const subW = chip->getSubW() + subX;
     int const subH = chip->getSubH() + subY;
 
-    if (x < subX || x > subW || y < subY || y > subH)
+    static constexpr float kMaxStarInfluencePx = 100.0f;
+    if (x < subX - kMaxStarInfluencePx || x > subW + kMaxStarInfluencePx ||
+            y < subY - kMaxStarInfluencePx || y > subH + kMaxStarInfluencePx)
         return 0;
 
-    float const totalFlux = static_cast<float>(flux(mag) * exp_s);
+    float const apertureMM = m_Cfg.apertureMM;
+    float const apertureScale = (!std::isnan(apertureMM) && apertureMM > 0.0f)
+                                ? (apertureMM / m_Cfg.refApertureMM) * (apertureMM / m_Cfg.refApertureMM)
+                                : 1.0f;
 
-    int const boxsizey = static_cast<int>(3.0f * m_Cfg.seeing / m_ImageScaleY) + 1;
+    float const totalFlux = static_cast<float>(flux(mag) * exp_s * apertureScale);
 
-    float const sigma    = m_Cfg.seeing / (2.0f * std::sqrt(2.0f * std::log(2.0f)));
-    float const norm     = 1.0f / (sigma * std::sqrt(2.0f * float(M_PI)));
-    float const inv2sig2 = 1.0f / (2.0f * sigma * sigma);
+    float const pixel_area = m_ImageScaleX * m_ImageScaleY;
+    if (!std::isfinite(pixel_area) || pixel_area <= 0.0f)
+        return 0;
 
+    float const beta     = 2.5f;
+    float const betaTerm = 4.0f * (std::pow(2.0f, 1.0f / beta) - 1.0f);
+
+    float fwhm2 = m_Cfg.seeing * m_Cfg.seeing;
+    if (!std::isnan(apertureMM) && apertureMM >= kMinApertureMM)
+    {
+        float const fwhm_diff = 1.22f * kCenterWavelengthMM / apertureMM * 206265.0f;
+        fwhm2 += fwhm_diff * fwhm_diff;
+    }
+
+    float const minFwhm  = std::min(m_ImageScaleX, m_ImageScaleY);
+    float const minFwhm2 = minFwhm * minFwhm;
+    if (!std::isfinite(fwhm2) || fwhm2 < minFwhm2)
+        fwhm2 = minFwhm2;
+
+    float const alpha2     = fwhm2 / betaTerm;
+    float const moffatNorm = (beta - 1.0f) / (float(M_PI) * alpha2);
+
+    float const threshold = std::max(moffatNorm * totalFlux * pixel_area * 2.0f, 1.0f);
+    float const r2_max    = alpha2 * (std::pow(threshold, 1.0f / beta) - 1.0f);
+    int   const moffatBox = (r2_max > 0.0f)
+                            ? static_cast<int>(std::sqrt(r2_max) / std::min(m_ImageScaleX, m_ImageScaleY)) + 1
+                            : static_cast<int>(3.0f * m_Cfg.seeing / std::min(m_ImageScaleX, m_ImageScaleY)) + 1;
+    static constexpr int maxRenderBox = 40;
+    int const boxsizey = std::min(moffatBox, maxRenderBox);
+
+    float const fracX = x - std::floor(x);
+    float const fracY = y - std::floor(y);
+    int   const ix    = static_cast<int>(std::floor(x));
+    int   const iy    = static_cast<int>(std::floor(y));
+
+    int const box2 = boxsizey * boxsizey;
     for (int sy = -boxsizey; sy <= boxsizey; sy++)
     {
         for (int sx = -boxsizey; sx <= boxsizey; sx++)
         {
-            float const dc2 = sx * sx * m_ImageScaleX * m_ImageScaleX
-                              + sy * sy * m_ImageScaleY * m_ImageScaleY;
-            float const fa  = norm * std::exp(-dc2 * inv2sig2);
-            int const fp = static_cast<int>(fa * totalFlux);
+            if (sx * sx + sy * sy > box2)
+                continue;
+            float const dx  = (sx - fracX) * m_ImageScaleX;
+            float const dy  = (sy - fracY) * m_ImageScaleY;
+            float const dc2 = dx * dx + dy * dy;
+            float const moffat = moffatNorm * std::pow(1.0f + dc2 / alpha2, -beta);
+            int   const fp     = static_cast<int>(moffat * totalFlux * pixel_area);
             if (fp > 0)
             {
-                if (addToPixel(chip,
-                               static_cast<int>(x) + sx,
-                               static_cast<int>(y) + sy, fp) != 0)
+                if (addToPixel(chip, ix + sx, iy + sy, fp) != 0)
                     drew = 1;
             }
         }
     }
+
+    static constexpr float haloNorm = 1e-3f;
+    float const haloCoeff = haloNorm * totalFlux;
+    if (haloCoeff >= 1.0f)
+    {
+        int const maxHaloR = static_cast<int>(std::sqrt(haloCoeff)) + 1;
+        for (int sy = -maxHaloR; sy <= maxHaloR; sy++)
+        {
+            for (int sx = -maxHaloR; sx <= maxHaloR; sx++)
+            {
+                float const r2 = static_cast<float>(sx * sx + sy * sy);
+                if (r2 < 1.0f)
+                    continue;
+                int const adu = static_cast<int>(haloCoeff / r2);
+                if (adu < 1)
+                    continue;
+                addToPixel(chip, ix + sx, iy + sy, adu);
+            }
+        }
+    }
+
+    int const bleedBox = static_cast<int>(3.0f * m_Cfg.seeing / std::min(m_ImageScaleX, m_ImageScaleY)) + 1;
+    for (int sx = -bleedBox; sx <= bleedBox; sx++)
+        bleedColumn(chip, ix + sx, iy);
+
+    if (m_Cfg.diffractionSpikes && totalFlux > 500.0f)
+    {
+        float const spikeCoeff = 0.0002f * totalFlux;
+        int   const maxDist    = std::max(chip->getSubW(), chip->getSubH());
+        float const cosT = std::cos(m_Cfg.cameraTheta);
+        float const sinT = std::sin(m_Cfg.cameraTheta);
+        for (int d = 1; d <= maxDist; d++)
+        {
+            int const adu = static_cast<int>(spikeCoeff / (d * d));
+            if (adu < 1)
+                break;
+            float const fd = static_cast<float>(d);
+            int const dx1 = static_cast<int>(std::round(fd * cosT));
+            int const dy1 = static_cast<int>(std::round(fd * sinT));
+            addToPixel(chip, ix + dx1, iy + dy1, adu);
+            addToPixel(chip, ix - dx1, iy - dy1, adu);
+            int const dx2 = static_cast<int>(std::round(-fd * sinT));
+            int const dy2 = static_cast<int>(std::round( fd * cosT));
+            addToPixel(chip, ix + dx2, iy + dy2, adu);
+            addToPixel(chip, ix - dx2, iy - dy2, adu);
+        }
+    }
+
     return drew;
 }
 
@@ -129,7 +279,7 @@ void SkyRenderer::drawSkyGlow(INDI::CCDChip *chip, float exp_s)
             float fp = (pt[0] + skyflux) * fa;
 
             if (fp > m_Cfg.maxVal) fp = static_cast<float>(m_Cfg.maxVal);
-            if (fp < pt[0]) fp = pt[0]; // never darken an already-bright pixel
+            if (fp < pt[0]) fp = pt[0];
             if (fp > m_MaxPix) m_MaxPix = static_cast<int>(fp);
             if (fp < m_MinPix) m_MinPix = static_cast<int>(fp);
 
@@ -152,40 +302,34 @@ int SkyRenderer::renderFrame(
     m_MaxPix = 0;
     m_MinPix = 65000;
 
-    // Image scale (arcsec/pixel) from focal length and pixel size
     m_ImageScaleX = static_cast<float>((chip->getPixelSizeX() / focal_length_mm) * 206.3);
     m_ImageScaleY = static_cast<float>((chip->getPixelSizeY() / focal_length_mm) * 206.3);
 
-    // Plate matrix: maps standard coords to pixel coords, with camera rotation applied
     double const theta = rotation_deg * (M_PI / 180.0);
-    double const pprx  = focal_length_mm / chip->getPixelSizeX() * 1000.0; // pixels per radian, X
-    double const ppry  = focal_length_mm / chip->getPixelSizeY() * 1000.0; // pixels per radian, Y
+    double const pprx  = focal_length_mm / chip->getPixelSizeX() * 1000.0;
+    double const ppry  = focal_length_mm / chip->getPixelSizeY() * 1000.0;
 
     double const pa =  pprx * std::cos(theta);
     double const pb =  ppry * std::sin(theta);
     double const pd = -pprx * std::sin(theta);
     double const pe =  ppry * std::cos(theta);
-    double const pc =  chip->getXRes() / 2.0;  // X center pixel
-    double const pf =  chip->getYRes() / 2.0;  // Y center pixel
+    double const pc =  chip->getXRes() / 2.0;
+    double const pf =  chip->getYRes() / 2.0;
     double const ccdW = chip->getXRes();
 
-    // Field center in radians
     double const rar  = ra_j2000_deg  * (M_PI / 180.0);
     double const decr = dec_j2000_deg * (M_PI / 180.0);
 
-    // GSC search radius (arcmin): half-diagonal of the chip in arcsec, converted to arcmin
     double radius = std::sqrt(
                         m_ImageScaleX * m_ImageScaleX * chip->getXRes() / 2.0 * chip->getXRes() / 2.0 +
                         m_ImageScaleY * m_ImageScaleY * chip->getYRes() / 2.0 * chip->getYRes() / 2.0) / 60.0;
     if (minSearchRadiusArcmin > 0 && radius < minSearchRadiusArcmin)
         radius = minSearchRadiusArcmin;
 
-    // Cap lookup magnitude for very wide fields to limit GSC processing time
     double lookuplimit = m_Cfg.limitingMag;
     if (radius > 60)
         lookuplimit = 11;
 
-    // Clear the frame buffer
     memset(chip->getFrameBuffer(), 0, chip->getFrameBufferSize());
 
     int drawn = 0;
@@ -195,7 +339,6 @@ int SkyRenderer::renderFrame(
         AutoCNumeric locale;
         char gsccmd[250];
 
-        // Handbook of astronomical image processing, eqs. 9.1/9.2 (gnomonic projection)
         snprintf(gsccmd, sizeof(gsccmd),
                  "gsc -c %8.6f %+8.6f -r %4.1f -m 0 %4.2f -n 3000",
                  range360(ra_j2000_deg),
@@ -232,7 +375,6 @@ int SkyRenderer::renderFrame(
                 double const sy = (sin(decr) * cos(sdecr) * cos(srar - rar)
                                    - cos(decr) * sin(sdecr)) / denom;
 
-                // Invert horizontally (CW->CCW, origin North)
                 double const ccdx = ccdW - (pa * sx + pb * sy + pc);
                 double const ccdy =          pd * sx + pe * sy + pf;
 
@@ -246,6 +388,37 @@ int SkyRenderer::renderFrame(
         else
         {
             drawn = -1;
+        }
+
+        // Bright star supplement: GSC omits stars brighter than ~mag 6.5.
+        if (drawn >= 0)
+        {
+            for (int bsi = 0; bsi < s_BrightStarsCount; ++bsi)
+            {
+                float const bsRaDeg  = s_BrightStars[bsi].ra;
+                float const bsDecDeg = s_BrightStars[bsi].dec;
+                float const bsMag    = s_BrightStars[bsi].mag;
+
+                double const srar  = bsRaDeg  * (M_PI / 180.0);
+                double const sdecr = bsDecDeg * (M_PI / 180.0);
+
+                double const denom = cos(decr) * cos(sdecr) * cos(srar - rar)
+                                     + sin(decr) * sin(sdecr);
+                if (denom <= 0)
+                    continue;
+
+                double const sx = cos(sdecr) * sin(srar - rar) / denom;
+                double const sy = (sin(decr) * cos(sdecr) * cos(srar - rar)
+                                   - cos(decr) * sin(sdecr)) / denom;
+
+                double const ccdx = ccdW - (pa * sx + pb * sy + pc);
+                double const ccdy =          pd * sx + pe * sy + pf;
+
+                drawn += drawImageStar(chip, bsMag,
+                                       static_cast<float>(ccdx),
+                                       static_cast<float>(ccdy),
+                                       exposure_s);
+            }
         }
     }
 
