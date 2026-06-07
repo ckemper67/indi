@@ -33,6 +33,7 @@
 #include "libastro.h"
 #include "indicom.h"
 
+#include <atomic>
 #include <math.h>
 
 #include <libnova/julian_day.h>
@@ -178,16 +179,16 @@ void HorizontalToEquatorial(IHorizontalCoordinates *object, IGeographicCoordinat
 //////////////////////////////////////////////////////////////////////////////////////////////
 ///
 //////////////////////////////////////////////////////////////////////////////////////////////
-static double g_JDOffset = 0.0;
+static std::atomic<double> g_JDOffset{0.0};
 
 void setJDOffset(double offset)
 {
-    g_JDOffset = offset;
+    g_JDOffset.store(offset, std::memory_order_relaxed);
 }
 
 double getJulianDate()
 {
-    return ln_get_julian_from_sys() + g_JDOffset;
+    return ln_get_julian_from_sys() + g_JDOffset.load(std::memory_order_relaxed);
 }
 
 } // namespace INDI

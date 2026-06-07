@@ -2302,6 +2302,14 @@ struct CapturingPlugin : public BuiltInMathPlugin
     }
 };
 
+struct ScopedJDOffset
+{
+    explicit ScopedJDOffset(double offset) { INDI::setJDOffset(offset); }
+    ~ScopedJDOffset() { INDI::setJDOffset(0.0); }
+    ScopedJDOffset(const ScopedJDOffset &) = delete;
+    ScopedJDOffset &operator=(const ScopedJDOffset &) = delete;
+};
+
 } // namespace
 
 TEST_F(AlignmentPluginTest, LegacyPlugin_JD_Fallback_CelestialToTelescope)
@@ -2354,7 +2362,7 @@ TEST_F(AlignmentPluginTest, LegacyPlugin_JD_Fallback_TelescopeToCelestial)
 TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_CelestialToTelescope)
 {
     const double kOffset = 10.0 * 365.25;
-    INDI::setJDOffset(kOffset);
+    ScopedJDOffset guard(kOffset);
 
     LegacyPlugin plugin;
     InMemoryDatabase db;
@@ -2366,14 +2374,12 @@ TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_CelestialToT
     // Base-class fallback: lastOffset = JD - ln_get_julian_from_sys()
     // With JD = getJulianDate() = sys + kOffset -> lastOffset ~= kOffset.
     EXPECT_NEAR(plugin.lastOffset, kOffset, 1.0 / 86400.0);
-
-    INDI::setJDOffset(0.0);
 }
 
 TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_TelescopeToCelestial)
 {
     const double kOffset = 10.0 * 365.25;
-    INDI::setJDOffset(kOffset);
+    ScopedJDOffset guard(kOffset);
 
     LegacyPlugin plugin;
     InMemoryDatabase db;
@@ -2384,8 +2390,6 @@ TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_TelescopeToC
     plugin.TransformTelescopeToCelestialJD(tdv, ra, dec, INDI::getJulianDate());
 
     EXPECT_NEAR(plugin.lastOffset, kOffset, 1.0 / 86400.0);
-
-    INDI::setJDOffset(0.0);
 }
 
 // When a JD offset is active, the compat shim TransformCelestialToTelescope
@@ -2395,7 +2399,7 @@ TEST_F(AlignmentPluginTest, SimulatedTime_LegacyFallback_UsesOffset_TelescopeToC
 TEST_F(AlignmentPluginTest, SimulatedTime_CompatShim_ForwardsGetJulianDate)
 {
     const double kOffset = 10.0 * 365.25;
-    INDI::setJDOffset(kOffset);
+    ScopedJDOffset guard(kOffset);
 
     InMemoryDatabase db;
     db.SetDatabaseReferencePosition(kLosAngeles);
@@ -2411,8 +2415,6 @@ TEST_F(AlignmentPluginTest, SimulatedTime_CompatShim_ForwardsGetJulianDate)
     // capturedJD should be in [t1 + kOffset, t2 + kOffset].
     EXPECT_GE(plugin.capturedJD, t1 + kOffset - 1.0 / 86400.0);
     EXPECT_LE(plugin.capturedJD, t2 + kOffset + 1.0 / 86400.0);
-
-    INDI::setJDOffset(0.0);
 }
 
 int main(int argc, char **argv)

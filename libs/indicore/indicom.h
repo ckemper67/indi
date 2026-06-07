@@ -322,6 +322,11 @@ int extractISOTime(const char *timestr, struct ln_date *iso_date);
  */
     double rangeDec(double r);
 
+/** \brief Returns current Julian Date adjusted for simulated-time offset.
+ *  Defined in libastro.cpp (C++ with extern "C" linkage).
+ */
+    double indi_get_julian_date(void);
+
 /** \brief get_local_sidereal_time Returns local sidereal time given longitude and system clock.
  *  \param longitude Longitude in INDI format (0 to 360) increasing eastward.
  *  \return Local Sidereal Time.

@@ -11,6 +11,7 @@
  *******************************************************************************/
 
 #include <gtest/gtest.h>
+#include <indicom.h>
 #include <libastro.h>
 #include <libnova/julian_day.h>
 #ifdef _USE_SYSTEM_JSONLIB
@@ -294,6 +295,25 @@ TEST(SimulatedTime, OffsetCanBeReset)
     double t2 = ln_get_julian_from_sys();
     EXPECT_GE(jd, t1) << "getJulianDate() < sys after reset";
     EXPECT_LE(jd, t2) << "getJulianDate() > sys after reset";
+}
+
+// get_local_sidereal_time() must use simulated time so that LST-dependent
+// calculations (tracking, coordinate transforms) are consistent with the
+// injected JD offset.  Half a solar day shifts LST by roughly 12 sidereal
+// hours; if the offset is ignored, the shift is near zero and the test fails.
+TEST(SimulatedTime, LST_ShiftsWithOffset)
+{
+    INDI::setJDOffset(0.0);
+    double lst_baseline = get_local_sidereal_time(0.0);
+
+    INDI::setJDOffset(0.5);
+    double lst_offset = get_local_sidereal_time(0.0);
+    INDI::setJDOffset(0.0);
+
+    // 0.5 solar days = 12h * (sidereal/solar) ~= 12.033 sidereal hours.
+    double diff = fmod(lst_offset - lst_baseline + 24.0, 24.0);
+    EXPECT_NEAR(diff, 12.033, 0.01)
+        << "LST did not shift by ~12h for a half-day JD offset";
 }
 
 int main(int argc, char **argv)
