@@ -152,6 +152,11 @@ bool CCDSim::initProperties()
     SimulateBayerSP.fill(getDeviceName(), "SIMULATE_BAYER", "Bayer", SIMULATOR_TAB, IP_RW,
                          ISR_1OFMANY, 60, IPS_IDLE);
 
+    DiffractionSpikesSP[INDI_ENABLED].fill("INDI_ENABLED", "Enabled", ISS_OFF);
+    DiffractionSpikesSP[INDI_DISABLED].fill("INDI_DISABLED", "Disabled", ISS_ON);
+    DiffractionSpikesSP.fill(getDeviceName(), "SIM_DIFFRACTION_SPIKES", "Diffraction Spikes",
+                             SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
     // Simulate focusing
     FocusSimulationNP[SIM_FOCUS_POSITION].fill("SIM_FOCUS_POSITION", "Focus", "%.f", 0.0, 100000.0, 1.0, 36700.0);
     FocusSimulationNP[SIM_FOCUS_MAX].fill("SIM_FOCUS_MAX", "Max. Position", "%.f", 0.0, 100000.0, 1.0, 100000.0);
@@ -275,6 +280,7 @@ void CCDSim::ISGetProperties(const char * dev)
     defineProperty(EqPENP);
     defineProperty(FocusSimulationNP);
     defineProperty(SimulateBayerSP);
+    defineProperty(DiffractionSpikesSP);
     defineProperty(CrashSP);
 }
 
@@ -519,10 +525,17 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     else
         exposure_time = ExposureRequest;
 
-    exposure_time *= (1 + sqrt(GainNP[0].getValue()));
+    static constexpr double referenceGain       = 90.0;
+    static constexpr double referenceGainFactor = 10.4868;
+    exposure_time *= GainNP[0].getValue() / referenceGain * referenceGainFactor;
 
     auto targetFocalLength = ScopeInfoNP[FOCAL_LENGTH].getValue() > 0 ? ScopeInfoNP[FOCAL_LENGTH].getValue() :
                              snoopedFocalLength;
+    if (!std::isfinite(targetFocalLength) || targetFocalLength <= 0)
+    {
+        LOG_WARN("Telescope focal length not available. Defaulting to 800 mm.");
+        targetFocalLength = 800.0;
+    }
 
     if (ShowStarField)
     {
@@ -598,8 +611,15 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         cfg.limitingMag   = m_LimitingMag;
         cfg.saturationMag = m_SaturationMag;
         cfg.seeing        = m_Seeing;
-        // Sky glow: 30% boost for realistic light-frame backgrounds; flat frames use diffuser daylight level
-        cfg.skyGlow = isLight ? m_SkyGlow * 1.3f : m_SkyGlow / 10.0f;
+        cfg.skyGlow       = isLight ? m_SkyGlow * 1.3f : m_SkyGlow / 10.0f;
+        cfg.refApertureMM = 100.0f;
+        double const apertureMM = ScopeInfoNP[APERTURE].getValue() > 0
+                                  ? ScopeInfoNP[APERTURE].getValue()
+                                  : snoopedAperture;
+        cfg.apertureMM = (!std::isnan(apertureMM) && apertureMM > 0.0)
+                         ? static_cast<float>(apertureMM) : 0.0f;
+        cfg.cameraTheta      = static_cast<float>(theta * M_PI / 180.0);
+        cfg.diffractionSpikes = (DiffractionSpikesSP[INDI_ENABLED].getState() == ISS_ON);
         m_Renderer.setConfig(cfg);
 
         std::unique_lock<std::mutex> guard(ccdBufferLock);
@@ -802,6 +822,13 @@ bool CCDSim::ISNewSwitch(const char * dev, const char * name, ISState * states, 
             SimulateBayerSP.setState(IPS_OK);
             SimulateBayerSP.apply();
 
+            return true;
+        }
+        else if (DiffractionSpikesSP.isNameMatch(name))
+        {
+            DiffractionSpikesSP.update(states, names, n);
+            DiffractionSpikesSP.setState(IPS_OK);
+            DiffractionSpikesSP.apply();
             return true;
         }
         else if (CoolerSP.isNameMatch(name))
@@ -1049,6 +1076,7 @@ bool CCDSim::saveConfigItems(FILE * fp)
 
     // Bayer
     SimulateBayerSP.save(fp);
+    DiffractionSpikesSP.save(fp);
 
     // Focus simulation
     FocusSimulationNP.save(fp);

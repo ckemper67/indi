@@ -390,10 +390,17 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
     else
         exposure_time = m_ExposureRequest;
 
-    exposure_time *= (1 + sqrt(GainNP[0].getValue()));
+    static constexpr double referenceGain       = 90.0;
+    static constexpr double referenceGainFactor = 10.4868;
+    exposure_time *= GainNP[0].getValue() / referenceGain * referenceGainFactor;
 
     auto targetFocalLength = ScopeInfoNP[FOCAL_LENGTH].getValue() > 0 ? ScopeInfoNP[FOCAL_LENGTH].getValue() :
                              snoopedFocalLength;
+    if (!std::isfinite(targetFocalLength) || targetFocalLength <= 0)
+    {
+        LOG_WARN("Guide scope focal length not available. Defaulting to 400 mm.");
+        targetFocalLength = 400.0;
+    }
 
     if (m_ShowStarField)
     {
@@ -532,8 +539,14 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         cfg.limitingMag   = m_LimitingMag;
         cfg.saturationMag = m_SaturationMag;
         cfg.seeing        = m_Seeing;
-        // Guide sim sky glow: no extra boost for light frames (guide images are typically short)
-        cfg.skyGlow = isLight ? m_SkyGlow : m_SkyGlow / 10.0f;
+        cfg.skyGlow       = isLight ? m_SkyGlow : m_SkyGlow / 10.0f;
+        cfg.refApertureMM = 30.0f;
+        double const apertureMM = ScopeInfoNP[APERTURE].getValue() > 0
+                                  ? ScopeInfoNP[APERTURE].getValue()
+                                  : snoopedAperture;
+        cfg.apertureMM = (!std::isnan(apertureMM) && apertureMM > 0.0)
+                         ? static_cast<float>(apertureMM) : 0.0f;
+        cfg.cameraTheta = static_cast<float>(theta * M_PI / 180.0);
         m_Renderer.setConfig(cfg);
 
         std::unique_lock<std::mutex> guard(ccdBufferLock);
