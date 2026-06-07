@@ -107,7 +107,7 @@ public:
     {
         return stream_deliver([nvp](const userio *io, void *user)
         {
-            s_set_number(io, user, nvp);
+            s_set_number(io, user, nvp, 0);
         });
     }
 
@@ -115,7 +115,7 @@ public:
     {
         return stream_deliver([svp](const userio *io, void *user)
         {
-            s_set_switch(io, user, svp);
+            s_set_switch(io, user, svp, 0);
         });
     }
 
@@ -123,7 +123,7 @@ public:
     {
         return stream_deliver([tvp](const userio *io, void *user)
         {
-            s_set_text(io, user, tvp);
+            s_set_text(io, user, tvp, 0);
         });
     }
 
@@ -131,7 +131,7 @@ public:
     {
         return stream_deliver([lvp](const userio *io, void *user)
         {
-            s_set_light(io, user, lvp);
+            s_set_light(io, user, lvp, 0);
         });
     }
 
@@ -139,7 +139,7 @@ public:
     {
         return stream_deliver([bvp](const userio *io, void *user)
         {
-            s_set_blob(io, user, bvp);
+            s_set_blob(io, user, bvp, 0);
         });
     }
 
@@ -168,7 +168,10 @@ private:
     static ssize_t s_write(void *user, const void *ptr, size_t n)
     {
         auto *st = static_cast<StreamState *>(user);
-        if (st->aborted) return 0;
+        // Return -1 (not 0) on abort: userio_xmlv1 does not retry short writes
+        // (verified: libs/indicore/indiuserio.c userio_xmlv1), but -1 is the
+        // correct POSIX signal for a write error.
+        if (st->aborted) return -1;
         const char *p = static_cast<const char *>(ptr);
 
         std::string &lx = st->trace->last_xml;
@@ -217,6 +220,12 @@ private:
 
     // Variadic trampolines: give IUUserIO a valid va_list while passing
     // fmt=nullptr so the message attribute is omitted entirely.
+    //
+    // Each helper is declared variadic so va_start is well-formed; callers
+    // pass a trailing int sentinel (0) so at least one variadic argument
+    // exists on the stack. fmt=nullptr causes IUUserIOSet*VA to skip the
+    // va_arg path entirely -- confirmed in libs/indicore/indiuserio.c,
+    // s_userio_xml_message_vprintf: `if (fmt)` guards every va_arg access.
     static void s_set_number(const userio *io, void *user,
                              const INumberVectorProperty *nvp, ...)
     {
@@ -261,7 +270,12 @@ private:
     {
         DispatchTrace trace;
         StreamState st;
-        st.lp        = newLilXML();
+        st.lp = newLilXML();
+        if (!st.lp)
+        {
+            trace.parse_error = "newLilXML() returned null";
+            return trace;
+        }
         st.consumers = &consumers_;
         st.trace     = &trace;
 

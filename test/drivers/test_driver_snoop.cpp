@@ -54,8 +54,12 @@ public:
     using INDI::CCD::EqNP;
     using INDI::CCD::J2000EqNP;
 
-    // Wire this CCD to snoop the named telescope.  Must be called before
-    // the first deliver() so EqNP.device matches the XML device attribute.
+    // Wire this CCD to snoop all telescope properties it currently handles:
+    //   EqNP (EQUATORIAL_EOD_COORD), J2000EqNP (EQUATORIAL_COORD),
+    //   TELESCOPE_PIER_SIDE (checked via ActiveDeviceTP).
+    // TELESCOPE_INFO (aperture + focal length) is NOT wired here because the
+    // telescope simulator does not publish it yet; add it once that bug is fixed
+    // and the simulator publishes TELESCOPE_APERTURE / TELESCOPE_FOCAL_LENGTH.
     void setSnoopedTelescope(const char *name)
     {
         ActiveDeviceTP[ACTIVE_TELESCOPE].setText(name);
@@ -79,7 +83,7 @@ protected:
 // ---------------------------------------------------------------------------
 
 // TELESCOPE_PIER_SIDE -> CCD::pierSide
-// Raw XML path: indiccd.cpp:758-770
+// Path: INDI::CCD::ISSnoopDevice, TELESCOPE_PIER_SIDE branch
 TEST_F(SnoopTest, pier_side_east_reaches_ccd)
 {
     TestScopeSim scope("TestScope");
@@ -92,7 +96,7 @@ TEST_F(SnoopTest, pier_side_east_reaches_ccd)
 
     auto t = bus.deliver(scope.PierSideSP);
     ASSERT_TRUE(t) << t.last_xml;
-    EXPECT_EQ(ccd.pierSide, 1);  // East = 1 (indiccd.cpp:768)
+    EXPECT_EQ(ccd.pierSide, 1);  // PIER_EAST -> 1
 }
 
 TEST_F(SnoopTest, pier_side_west_reaches_ccd)
@@ -107,11 +111,11 @@ TEST_F(SnoopTest, pier_side_west_reaches_ccd)
 
     auto t = bus.deliver(scope.PierSideSP);
     ASSERT_TRUE(t) << t.last_xml;
-    EXPECT_EQ(ccd.pierSide, 0);  // West = 0 (indiccd.cpp:770)
+    EXPECT_EQ(ccd.pierSide, 0);  // PIER_WEST -> 0
 }
 
 // EQUATORIAL_EOD_COORD -> CCD::RA / CCD::Dec
-// Modern snoop path: EqNP.snoop(root) at indiccd.cpp:733
+// Path: INDI::CCD::ISSnoopDevice, EqNP.snoop() branch
 TEST_F(SnoopTest, equatorial_coord_reaches_ccd)
 {
     TestScopeSim scope("TestScope");
@@ -126,6 +130,48 @@ TEST_F(SnoopTest, equatorial_coord_reaches_ccd)
     ASSERT_TRUE(t) << t.last_xml;
     EXPECT_DOUBLE_EQ(ccd.RA,  6.75);
     EXPECT_DOUBLE_EQ(ccd.Dec, -45.0);
+}
+
+// Device-name mismatch: delivery from a different telescope must not update
+// the CCD.  RA starts as NaN; it must remain NaN if the device name does not
+// match ActiveDeviceTP[ACTIVE_TELESCOPE].
+TEST_F(SnoopTest, wrong_telescope_name_not_delivered)
+{
+    TestScopeSim scope("RealScope");
+    TestCCDSim   ccd;
+    bus.snoop(ccd, scope, [&]{ ccd.setSnoopedTelescope("OtherScope"); });
+
+    scope.EqNP[AXIS_RA].setValue(9.99);
+    scope.EqNP[AXIS_DE].setValue(10.0);
+    scope.EqNP.setState(IPS_OK);
+
+    auto t = bus.deliver(scope.EqNP);
+    ASSERT_TRUE(t) << t.last_xml;      // XML round-trip succeeded
+    EXPECT_TRUE(std::isnan(ccd.RA));   // value rejected due to device mismatch
+    EXPECT_TRUE(std::isnan(ccd.Dec));
+}
+
+// Two consumers: both receive the same delivery uncorrupted.  If the first
+// consumer mutated the XMLEle before delXMLEle(), the second would see wrong
+// values.
+TEST_F(SnoopTest, two_consumers_both_receive_delivery)
+{
+    TestScopeSim scope("TestScope");
+    TestCCDSim   ccd1;
+    TestCCDSim   ccd2;
+    bus.snoop(ccd1, scope, [&]{ ccd1.setSnoopedTelescope(scope.getDeviceName()); });
+    bus.snoop(ccd2, scope, [&]{ ccd2.setSnoopedTelescope(scope.getDeviceName()); });
+
+    scope.EqNP[AXIS_RA].setValue(3.14);
+    scope.EqNP[AXIS_DE].setValue(45.0);
+    scope.EqNP.setState(IPS_OK);
+
+    auto t = bus.deliver(scope.EqNP);
+    ASSERT_TRUE(t) << t.last_xml;
+    EXPECT_DOUBLE_EQ(ccd1.RA,  3.14);
+    EXPECT_DOUBLE_EQ(ccd1.Dec, 45.0);
+    EXPECT_DOUBLE_EQ(ccd2.RA,  3.14);
+    EXPECT_DOUBLE_EQ(ccd2.Dec, 45.0);
 }
 
 // ---------------------------------------------------------------------------
