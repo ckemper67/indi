@@ -3,6 +3,9 @@
 #include <gtest/gtest.h>
 
 #include "guide_simulator.h"
+#include "libastro.h"
+
+#include <libnova/julian_day.h>
 
 char _me[] = "MockGuideSimDriver";
 char *me = _me;
@@ -156,6 +159,29 @@ class MockGuideSimDriver : public GuideSim
             EXPECT_GT(peakPixel(), 0)
                     << "frame must contain sky glow with polar drift active";
         }
+
+        void testBrightStarSupplementRenders()
+        {
+            prepareForRendering();
+
+            // Capella (alpha Aurigae): J2000 RA 5h 16m 41.4s, Dec +45 59' 56"
+            static constexpr double kCapellaJ2000RAHours = 79.1721 / 15.0;
+            static constexpr double kCapellaJ2000DecDeg  = 45.9990;
+
+            INDI::IEquatorialCoordinates j2000 { kCapellaJ2000RAHours, kCapellaJ2000DecDeg };
+            INDI::IEquatorialCoordinates observed { 0, 0 };
+            INDI::J2000toObserved(&j2000, ln_get_julian_from_sys(), &observed);
+
+            RA  = observed.rightascension;
+            Dec = observed.declination;
+            pierSide = 0;
+
+            ASSERT_TRUE(StartExposure(1.0f));
+
+            EXPECT_GT(peakPixel(), 1000)
+                    << "Pointing at Capella (mag 0.08) with a 60mm aperture should "
+                    << "produce bright pixels via the bright-star supplement";
+        }
 };
 
 TEST(GuideSimulatorDriverTest, test_properties)
@@ -181,6 +207,11 @@ TEST(GuideSimulatorDriverTest, king_transform_smoke_test)
 TEST(GuideSimulatorDriverTest, polar_drift_smoke_test)
 {
     MockGuideSimDriver().testPolarDriftSmokeTest();
+}
+
+TEST(GuideSimulatorDriverTest, bright_star_supplement_renders)
+{
+    MockGuideSimDriver().testBrightStarSupplementRenders();
 }
 
 int main(int argc, char **argv)

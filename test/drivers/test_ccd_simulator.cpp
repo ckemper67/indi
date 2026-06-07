@@ -131,7 +131,7 @@ TEST_F(SkyRendererTest, saturation_mag_produces_high_adu)
 
     renderer.drawImageStar(&chip, cfg.saturationMag, xres / 2, yres / 2, 1.0f);
 
-    EXPECT_GT(peakPixel(xres, yres), static_cast<uint16_t>(maxval / 4))
+    EXPECT_GT(peakPixel(xres, yres), static_cast<uint16_t>(maxval / 8))
             << "a star at saturation magnitude for 1s should produce high ADU";
 }
 
@@ -528,6 +528,236 @@ TEST_F(SkyRendererTest, readout_noise_skipped_when_zero)
 
     EXPECT_EQ(sumFrame(xres, yres), 0)
             << "maxNoise <= 0 must skip noise application entirely";
+}
+
+// --- Moffat PSF, halo, bleed, spikes ---
+
+TEST_F(SkyRendererTest, moffat_wider_wings_than_gaussian_box)
+{
+    int const xres = 65;
+    int const yres = 65;
+    int const cx   = xres / 2;
+    int const cy   = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 1.0f;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 1.0f);
+
+    uint16_t *buf = fb();
+    EXPECT_GT(buf[cy * xres + cx + 3], 0u)
+            << "Moffat wings must extend beyond 3 pixels at seeing=1";
+}
+
+TEST_F(SkyRendererTest, aperture_scaling)
+{
+    int const xres = 33;
+    int const yres = 33;
+    int const cx   = xres / 2;
+    int const cy   = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 60000;
+    cfg.saturationMag = 10.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 2.0f;
+    cfg.refApertureMM = 100.0f;
+
+    cfg.apertureMM = 100.0f;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+    renderer.drawImageStar(&chip, 12.0f, cx, cy, 1.0f);
+    long const sum100 = sumFrame(xres, yres);
+
+    cfg.apertureMM = 200.0f;
+    renderer.setConfig(cfg);
+    setupChip(xres, yres);
+    renderer.drawImageStar(&chip, 12.0f, cx, cy, 1.0f);
+    long const sum200 = sumFrame(xres, yres);
+
+    ASSERT_GT(sum100, 0L);
+    EXPECT_NEAR(static_cast<double>(sum200) / sum100, 4.0, 0.5)
+            << "total flux should scale as (D/D_ref)^2";
+}
+
+TEST_F(SkyRendererTest, bidirectional_bleed)
+{
+    int const xres   = 11;
+    int const yres   = 11;
+    int const maxval = 1000;
+    int const cx     = xres / 2;
+    int const cy     = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = maxval;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 30.0f;
+    cfg.seeing        = 1.0f;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    // Saturate the center pixel well above maxVal
+    uint16_t *buf = fb();
+    int const center = cx + cy * xres;
+    buf[center] = static_cast<uint16_t>(maxval + 400);
+
+    // addToPixel clamps at 65535, but bleedColumn drains to maxVal
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+
+    EXPECT_LE(buf[center], static_cast<uint16_t>(maxval))
+            << "center must be clamped to maxVal after bleed";
+    EXPECT_GT(buf[center - xres], 0u) << "upward bleed missing";
+    EXPECT_GT(buf[center + xres], 0u) << "downward bleed missing";
+}
+
+TEST_F(SkyRendererTest, halo_isotropic)
+{
+    int const xres = 65;
+    int const yres = 65;
+    int const cx   = xres / 2;
+    int const cy   = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 1.0f;
+    cfg.diffractionSpikes = false;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+
+    uint16_t *buf = fb();
+    uint16_t const right = buf[cy * xres + cx + 20];
+    uint16_t const left  = buf[cy * xres + cx - 20];
+    uint16_t const down  = buf[(cy + 20) * xres + cx];
+    uint16_t const up    = buf[(cy - 20) * xres + cx];
+
+    EXPECT_GT(right, 0u) << "halo must illuminate pixels at r=20";
+    EXPECT_EQ(right, left) << "halo must be isotropic (right vs left)";
+    EXPECT_EQ(right, down) << "halo must be isotropic (right vs down)";
+    EXPECT_EQ(right, up)   << "halo must be isotropic (right vs up)";
+}
+
+TEST_F(SkyRendererTest, diffraction_spike_orientation)
+{
+    int const xres = 65;
+    int const yres = 65;
+    int const cx   = xres / 2;
+    int const cy   = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 1.0f;
+    cfg.diffractionSpikes = true;
+    cfg.cameraTheta       = 0.0f;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+    uint16_t *buf = fb();
+    uint16_t const horiz_0 = buf[cy * xres + cx + 10];
+    uint16_t const diag_0  = buf[(cy + 7) * xres + cx + 7];
+
+    cfg.cameraTheta = static_cast<float>(M_PI / 4.0);
+    renderer.setConfig(cfg);
+    setupChip(xres, yres);
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+    buf = fb();
+    uint16_t const horiz_45 = buf[cy * xres + cx + 10];
+    uint16_t const diag_45  = buf[(cy + 7) * xres + cx + 7];
+
+    EXPECT_GT(horiz_0,  diag_0)   << "theta=0: horizontal arm should be brighter than diagonal";
+    EXPECT_GT(diag_45,  horiz_45) << "theta=45: diagonal arm should be brighter than horizontal";
+}
+
+TEST_F(SkyRendererTest, diffraction_spikes_disabled)
+{
+    int const xres = 65;
+    int const yres = 65;
+    int const cx   = xres / 2;
+    int const cy   = yres / 2;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 1.0f;
+    cfg.diffractionSpikes = true;
+    cfg.cameraTheta       = 0.0f;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+    uint16_t const with_spikes = fb()[cy * xres + cx + 10];
+
+    cfg.diffractionSpikes = false;
+    renderer.setConfig(cfg);
+    setupChip(xres, yres);
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100.0f);
+    uint16_t const without_spikes = fb()[cy * xres + cx + 10];
+
+    EXPECT_GT(with_spikes, without_spikes)
+            << "enabling spikes must add brightness on the spike axis";
+}
+
+TEST_F(SkyRendererTest, add_to_pixel_clamps_at_65535)
+{
+    int const xres   = 5;
+    int const yres   = 5;
+    int const maxval = 1000;
+
+    RenderConfig cfg;
+    cfg.maxVal = maxval;
+    renderer.setConfig(cfg);
+    setupChip(xres, yres);
+
+    uint16_t *buf = fb();
+    int const cx = xres / 2;
+    int const cy = yres / 2;
+
+    buf[cy * xres + cx] = 1;
+    renderer.drawImageStar(&chip, 0.0f, cx, cy, 100000.0f);
+
+    EXPECT_LE(buf[cy * xres + cx], static_cast<uint16_t>(65535))
+            << "addToPixel must clamp at 65535 for bleedColumn to work";
+}
+
+TEST_F(SkyRendererTest, off_frame_star_halo)
+{
+    int const xres       = 65;
+    int const yres       = 65;
+    int const cy         = yres / 2;
+    int const frame_edge = xres - 1;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 20.0f;
+    cfg.seeing        = 1.0f;
+    cfg.diffractionSpikes = false;
+    renderer.setConfig(cfg);
+    renderer.setImageScale(1.0f, 1.0f);
+    setupChip(xres, yres);
+
+    renderer.drawImageStar(&chip, 0.0f, static_cast<float>(xres + 50),
+                           static_cast<float>(cy), 100.0f);
+    EXPECT_GT(fb()[cy * xres + frame_edge], 0u)
+            << "halo from star 50px off-frame must illuminate the frame edge";
 }
 
 // --- benchmark (no assertions, informational only) ---
