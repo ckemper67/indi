@@ -222,6 +222,13 @@ bool GuideSim::initProperties()
     ToggleTimeoutSP[INDI_DISABLED].fill("INDI_DISABLED", "Disabled", ISS_ON);
     ToggleTimeoutSP.fill(getDeviceName(), "CCD_TIMEOUT", "Timeout", SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
 
+#ifdef HAVE_ERFA
+    ApparentPlaceSP[INDI_ENABLED].fill("INDI_ENABLED", "Enabled", ISS_OFF);
+    ApparentPlaceSP[INDI_DISABLED].fill("INDI_DISABLED", "Disabled", ISS_ON);
+    ApparentPlaceSP.fill(getDeviceName(), "SIM_APPARENT_PLACE", "Apparent Place",
+                         SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+#endif
+
 #ifdef USE_EQUATORIAL_PE
     IDSnoopDevice(ActiveDeviceTP[0].getText(), "EQUATORIAL_PE");
 #else
@@ -279,6 +286,9 @@ void GuideSim::ISGetProperties(const char * dev)
     defineProperty(SimulatorSettingsNP);
     defineProperty(EqPENP);
     defineProperty(WeatherDeviceTP);
+#ifdef HAVE_ERFA
+    defineProperty(ApparentPlaceSP);
+#endif
     defineProperty(SimulateRgbSP);
     defineProperty(ToggleTimeoutSP);
 }
@@ -585,10 +595,16 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             obs.rar_proj  = jnow_rad * DEGREES_TO_RADIANS;
             obs.decr_proj = jnow_decr_b + (decRandomDrift + decTDrift + jnow_decDrift / 3600.0) * DEGREES_TO_RADIANS;
 
+            bool const useApparentPlace =
+#ifdef HAVE_ERFA
+                (ApparentPlaceSP[INDI_ENABLED].getState() == ISS_ON);
+#else
+                false;
+#endif
             int drawn = m_Renderer.renderFrame(targetChip, rad, cameradec,
                                                targetFocalLength, theta,
                                                static_cast<float>(exposure_time), isLight,
-                                               kingMinRadius, &obs);
+                                               kingMinRadius, useApparentPlace ? &obs : nullptr);
             if (isLight && drawn < 0)
                 LOG_ERROR("Error launching gsc, is it installed with appropriate environment variables set?");
             else if (isLight && drawn == 0)

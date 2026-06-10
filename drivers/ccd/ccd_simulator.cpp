@@ -157,6 +157,13 @@ bool CCDSim::initProperties()
     DiffractionSpikesSP.fill(getDeviceName(), "SIM_DIFFRACTION_SPIKES", "Diffraction Spikes",
                              SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
 
+#ifdef HAVE_ERFA
+    ApparentPlaceSP[INDI_ENABLED].fill("INDI_ENABLED", "Enabled", ISS_OFF);
+    ApparentPlaceSP[INDI_DISABLED].fill("INDI_DISABLED", "Disabled", ISS_ON);
+    ApparentPlaceSP.fill(getDeviceName(), "SIM_APPARENT_PLACE", "Apparent Place",
+                         SIMULATOR_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+#endif
+
     // Simulate focusing
     FocusSimulationNP[SIM_FOCUS_POSITION].fill("SIM_FOCUS_POSITION", "Focus", "%.f", 0.0, 100000.0, 1.0, 36700.0);
     FocusSimulationNP[SIM_FOCUS_MAX].fill("SIM_FOCUS_MAX", "Max. Position", "%.f", 0.0, 100000.0, 1.0, 100000.0);
@@ -285,6 +292,9 @@ void CCDSim::ISGetProperties(const char * dev)
     defineProperty(FocusSimulationNP);
     defineProperty(SimulateBayerSP);
     defineProperty(DiffractionSpikesSP);
+#ifdef HAVE_ERFA
+    defineProperty(ApparentPlaceSP);
+#endif
     defineProperty(WeatherDeviceTP);
     defineProperty(CrashSP);
 }
@@ -660,9 +670,15 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
             obs.rar_proj  = jnow_ra_deg * (M_PI / 180.0);
             obs.decr_proj = (jnow_dec_adj + decDriftApp / 3600.0) * (M_PI / 180.0);
 
+            bool const useApparentPlace =
+#ifdef HAVE_ERFA
+                (ApparentPlaceSP[INDI_ENABLED].getState() == ISS_ON);
+#else
+                false;
+#endif
             int drawn = m_Renderer.renderFrame(targetChip, ra_deg, dec_deg,
                                                targetFocalLength, theta, exposure_time, isLight,
-                                               0, &obs);
+                                               0, useApparentPlace ? &obs : nullptr);
             if (isLight && drawn < 0)
                 LOG_ERROR("Error launching gsc, is it installed with appropriate environment variables set?");
             else if (isLight && drawn == 0)

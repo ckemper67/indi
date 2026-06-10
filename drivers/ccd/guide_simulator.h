@@ -218,6 +218,7 @@ class GuideSim : public INDI::CCD
 
 
         INDI::PropertySwitch SimulateRgbSP {2};
+        INDI::PropertySwitch ApparentPlaceSP {2};
         enum
         {
             SIMULATE_YES,

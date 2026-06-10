@@ -222,6 +222,7 @@ class CCDSim : public INDI::CCD, public INDI::FilterInterface
 
         INDI::PropertySwitch SimulateBayerSP {2};
         INDI::PropertySwitch DiffractionSpikesSP {2};
+        INDI::PropertySwitch ApparentPlaceSP {2};
         enum
         {
             INDI_ENABLED,

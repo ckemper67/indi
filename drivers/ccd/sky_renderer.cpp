@@ -11,28 +11,20 @@
 #ifdef HAVE_ERFA
 #include <erfa.h>
 
-// Convert an ICRS J2000 catalog position to equinox-based apparent place.
-// Uses eraAtco13 with refraction disabled so the result matches libnova's JNow frame.
-static void erfaApparentPlace(double ra_icrs, double dec_icrs,
-                              double jd_utc,
-                              double lon_rad, double lat_rad, double alt_m,
-                              double phpa, double tc, double rh, double wl,
-                              double *ra_app, double *dec_app)
+// Apply a pre-built eraASTROM context to one ICRS catalog star.
+// eraAtciqz handles zero proper-motion/parallax/RV (the common catalog case).
+// eraAtioq adds diurnal aberration and refraction.
+// Result is equinox-based apparent RA/Dec (topocentric, refracted).
+static inline void applyAstrom(double ra_icrs, double dec_icrs,
+                               eraASTROM *astrom, double eo,
+                               double *ra_app, double *dec_app)
 {
-    // Recommended 2-part UTC split at half-integer day (ERFA cookbook)
-    double utc1 = std::floor(jd_utc) + 0.5;
-    double utc2 = jd_utc - utc1;
+    double ri, di;
+    eraAtciqz(ra_icrs, dec_icrs, astrom, &ri, &di);
 
-    double aob, zob, hob, dob, rob, eo;
-    eraAtco13(ra_icrs, dec_icrs,
-              0.0, 0.0, 0.0, 0.0,   // pmRA, pmDec, parallax, radial velocity
-              utc1, utc2, 0.0,       // UTC (2-part), DUT1=0
-              lon_rad, lat_rad, alt_m,
-              0.0, 0.0,              // polar motion xp, yp
-              phpa, tc, rh, wl,
-              &aob, &zob, &hob, &dob, &rob, &eo);
+    double aob, zob, hob, dob, rob;
+    eraAtioq(ri, di, astrom, &aob, &zob, &hob, &dob, &rob);
 
-    // rob is CIRS RA; subtract equation of origins to get equinox-based apparent RA
     *ra_app  = eraAnp(rob - eo);
     *dec_app = dob;
 }
@@ -353,7 +345,21 @@ int SkyRenderer::renderFrame(
     double const decr = dec_j2000_deg * (M_PI / 180.0);
 
 #ifdef HAVE_ERFA
-    bool const useErfa = (obs != nullptr && obs->jd_utc > 0.0);
+    bool useErfa = (obs != nullptr && obs->jd_utc > 0.0);
+    eraASTROM astrom {};
+    double    frameEo = 0.0;
+    if (useErfa)
+    {
+        double utc1 = std::floor(obs->jd_utc) + 0.5;
+        double utc2 = obs->jd_utc - utc1;
+        int const j = eraApco13(utc1, utc2, 0.0,
+                                obs->lon_rad, obs->lat_rad, obs->alt_m,
+                                0.0, 0.0,
+                                obs->phpa, obs->tc, obs->rh, obs->wl,
+                                &astrom, &frameEo);
+        if (j == -1)
+            useErfa = false; // unacceptable date -- fall back to J2000
+    }
 #else
     bool const useErfa = false;
     (void)obs;
@@ -408,10 +414,8 @@ int SkyRenderer::renderFrame(
                 double srar, sdecr;
 #ifdef HAVE_ERFA
                 if (useErfa)
-                    erfaApparentPlace(ra * (M_PI / 180.0), dec * (M_PI / 180.0),
-                                      obs->jd_utc, obs->lon_rad, obs->lat_rad, obs->alt_m,
-                                      obs->phpa, obs->tc, obs->rh, obs->wl,
-                                      &srar, &sdecr);
+                    applyAstrom(ra * (M_PI / 180.0), dec * (M_PI / 180.0),
+                                &astrom, frameEo, &srar, &sdecr);
                 else
 #endif
                 {
@@ -455,10 +459,8 @@ int SkyRenderer::renderFrame(
                 double srar, sdecr;
 #ifdef HAVE_ERFA
                 if (useErfa)
-                    erfaApparentPlace(bsRaDeg * (M_PI / 180.0), bsDecDeg * (M_PI / 180.0),
-                                      obs->jd_utc, obs->lon_rad, obs->lat_rad, obs->alt_m,
-                                      obs->phpa, obs->tc, obs->rh, obs->wl,
-                                      &srar, &sdecr);
+                    applyAstrom(bsRaDeg * (M_PI / 180.0), bsDecDeg * (M_PI / 180.0),
+                                &astrom, frameEo, &srar, &sdecr);
                 else
 #endif
                 {
