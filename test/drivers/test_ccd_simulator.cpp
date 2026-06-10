@@ -791,6 +791,50 @@ TEST_F(SkyRendererTest, draw_star_benchmark)
     std::cout << "[          ] drawImageStar benchmark: " << duration << " ns/call" << std::endl;
 }
 
+TEST_F(SkyRendererTest, apparent_place_benchmark)
+{
+    // Orion: star-rich field, good gsc coverage
+    double const ra_deg  = 83.8;
+    double const dec_deg = -5.4;
+    double const focal_mm = 500.0;
+
+    RenderConfig cfg;
+    cfg.maxVal        = 65000;
+    cfg.saturationMag = 0.0f;
+    cfg.limitingMag   = 11.0f;
+    cfg.seeing        = 2.0f;
+    renderer.setConfig(cfg);
+    setupChip(1280, 1024, 4.6f);
+
+    ObserverContext obs;
+    obs.jd_utc    = 2461041.5;   // 2026-01-01 00:00 UTC
+    obs.lon_rad   = 0.0;
+    obs.lat_rad   = 0.5;         // ~28 deg N
+    obs.alt_m     = 100.0;
+    obs.phpa      = 1013.25;
+    obs.tc        = 15.0;
+    obs.rh        = 0.5;
+    obs.wl        = 0.55;
+    obs.rar_proj  = ra_deg  * (M_PI / 180.0);
+    obs.decr_proj = dec_deg * (M_PI / 180.0);
+
+    // Warmup: load gsc catalog into OS cache so timed passes see identical I/O cost.
+    renderer.renderFrame(&chip, ra_deg, dec_deg, focal_mm, 0, 1.0f, true, 0, nullptr);
+
+    auto const t0 = std::chrono::steady_clock::now();
+    renderer.renderFrame(&chip, ra_deg, dec_deg, focal_mm, 0, 1.0f, true, 0, nullptr);
+    auto const t1 = std::chrono::steady_clock::now();
+    renderer.renderFrame(&chip, ra_deg, dec_deg, focal_mm, 0, 1.0f, true, 0, &obs);
+    auto const t2 = std::chrono::steady_clock::now();
+
+    auto ms = [](auto a, auto b)
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+    };
+    std::cout << "[          ] renderFrame J2000:   " << ms(t0, t1) << " ms" << std::endl;
+    std::cout << "[          ] renderFrame ERFA:    " << ms(t1, t2) << " ms" << std::endl;
+}
+
 // --- CCDSim driver-level tests ---
 
 TEST(CCDSimulatorDriverTest, test_properties)
