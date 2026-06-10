@@ -250,6 +250,10 @@ bool CCDSim::initProperties()
     FilterSlotNP[0].setMin(1);
     FilterSlotNP[0].setMax(8);
 
+    WeatherDeviceTP[0].fill("WEATHER_SOURCE", "Device", "");
+    WeatherDeviceTP.fill(getDeviceName(), "CCD_WEATHER_SOURCE", "Weather Source",
+                         SIMULATOR_TAB, IP_RW, 60, IPS_IDLE);
+
     addDebugControl();
 
     setDriverInterface(getDriverInterface() | FILTER_INTERFACE);
@@ -281,6 +285,7 @@ void CCDSim::ISGetProperties(const char * dev)
     defineProperty(FocusSimulationNP);
     defineProperty(SimulateBayerSP);
     defineProperty(DiffractionSpikesSP);
+    defineProperty(WeatherDeviceTP);
     defineProperty(CrashSP);
 }
 
@@ -560,11 +565,18 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         theta = range360(theta);
         LOGF_DEBUG("Rotator Angle: %f, Camera Rotation: %f", RotatorAngle, theta);
 
+        // JNow coords for ERFA projection center; default to raw RA/Dec
+        double jnow_ra_hours = RA;
+        double jnow_dec_deg  = Dec;
+
 #ifdef USE_EQUATORIAL_PE
         if (usePE)
         {
             currentRA = raPE + guideWEOffset;
             currentDE = decPE + guideNSOffset;
+            // raPE/decPE are J2000; use them as-is for the apparent centre approximation
+            jnow_ra_hours = currentRA;
+            jnow_dec_deg  = currentDE;
         }
         else
         {
@@ -583,6 +595,9 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                 currentRA = 0;
                 currentDE = 0;
             }
+
+            jnow_ra_hours = currentRA;
+            jnow_dec_deg  = currentDE;
 
             INDI::IEquatorialCoordinates epochPos { currentRA, currentDE }, J2000Pos { 0, 0 };
             INDI::ObservedToJ2000(&epochPos, ln_get_julian_from_sys(), &J2000Pos);
@@ -626,8 +641,28 @@ int CCDSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         if (isLight || isFlat)
         {
+            ObserverContext obs;
+            obs.jd_utc    = ln_get_julian_from_sys();
+            obs.lon_rad   = m_SiteLongitude * (M_PI / 180.0);
+            obs.lat_rad   = m_SiteLatitude  * (M_PI / 180.0);
+            obs.alt_m     = m_SiteAltitude;
+            // Atmospheric refraction: use snooped weather or standard atmosphere from altitude
+            obs.phpa = (m_WeatherPressure > 0.0) ? m_WeatherPressure
+                       : 1013.25 * std::pow(1.0 - 2.25577e-5 * m_SiteAltitude, 5.25588);
+            obs.tc   = m_WeatherTemperature;
+            obs.rh   = m_WeatherHumidity;
+            obs.wl   = 0.55;
+            // Apparent (JNow) boresight with the same offsets applied as to J2000
+            double const jnow_ra_deg  = jnow_ra_hours * 15.0 + PEOffset;
+            double const jnow_dec_adj = jnow_dec_deg + m_OAGOffset / 60.0;
+            double const jnow_decr    = jnow_dec_adj * (M_PI / 180.0);
+            double const decDriftApp  = (m_PolarDrift * m_PolarError * std::cos(jnow_decr)) / 3.81;
+            obs.rar_proj  = jnow_ra_deg * (M_PI / 180.0);
+            obs.decr_proj = (jnow_dec_adj + decDriftApp / 3600.0) * (M_PI / 180.0);
+
             int drawn = m_Renderer.renderFrame(targetChip, ra_deg, dec_deg,
-                                               targetFocalLength, theta, exposure_time, isLight);
+                                               targetFocalLength, theta, exposure_time, isLight,
+                                               0, &obs);
             if (isLight && drawn < 0)
                 LOG_ERROR("Error launching gsc, is it installed with appropriate environment variables set?");
             else if (isLight && drawn == 0)
@@ -712,6 +747,17 @@ bool CCDSim::ISNewText(const char * dev, const char * name, char * texts[], char
         //  Now lets see if it's something we process here
         if (INDI::FilterInterface::processText(dev, name, texts, names, n))
             return true;
+
+        if (WeatherDeviceTP.isNameMatch(name))
+        {
+            WeatherDeviceTP.update(texts, names, n);
+            WeatherDeviceTP.setState(IPS_OK);
+            WeatherDeviceTP.apply();
+            if (WeatherDeviceTP[0].getText() && WeatherDeviceTP[0].getText()[0] != '\0')
+                IDSnoopDevice(WeatherDeviceTP[0].getText(), "WEATHER_PARAMETERS");
+            saveConfig(WeatherDeviceTP);
+            return true;
+        }
 
         if (DirectoryTP.isNameMatch(name))
         {
@@ -952,7 +998,10 @@ void CCDSim::activeDevicesUpdated()
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "EQUATORIAL_PE");
 #endif
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "EQUATORIAL_EOD_COORD");
+    IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "GEOGRAPHIC_COORD");
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_FOCUSER].getText(), "FWHM");
+    if (WeatherDeviceTP[0].getText() && WeatherDeviceTP[0].getText()[0] != '\0')
+        IDSnoopDevice(WeatherDeviceTP[0].getText(), "WEATHER_PARAMETERS");
 
     strncpy(FWHMNP.device, ActiveDeviceTP[ACTIVE_FOCUSER].getText(), MAXINDIDEVICE);
 }
@@ -969,7 +1018,39 @@ bool CCDSim::ISSnoopDevice(XMLEle * root)
     XMLEle * ep           = nullptr;
     const char * propName = findXMLAttValu(root, "name");
 
-    if (!strcmp(propName, "ABS_FOCUS_POSITION"))
+    if (!strcmp(propName, "GEOGRAPHIC_COORD"))
+    {
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            const char * name = findXMLAttValu(ep, "name");
+            if (!strcmp(name, "LAT"))
+                m_SiteLatitude  = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "LONG"))
+                m_SiteLongitude = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "ELEV"))
+                m_SiteAltitude  = atof(pcdataXMLEle(ep));
+        }
+        LOGF_DEBUG("Snooped site location: lat=%f lon=%f alt=%f",
+                   m_SiteLatitude, m_SiteLongitude, m_SiteAltitude);
+        return true;
+    }
+    else if (!strcmp(propName, "WEATHER_PARAMETERS"))
+    {
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            const char * name = findXMLAttValu(ep, "name");
+            if (!strcmp(name, "WEATHER_PRESSURE"))
+                m_WeatherPressure    = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "WEATHER_TEMPERATURE"))
+                m_WeatherTemperature = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "WEATHER_HUMIDITY"))
+                m_WeatherHumidity    = atof(pcdataXMLEle(ep)) / 100.0;
+        }
+        LOGF_DEBUG("Snooped weather: pressure=%.1f hPa temperature=%.1f C humidity=%.0f%%",
+                   m_WeatherPressure, m_WeatherTemperature, m_WeatherHumidity * 100.0);
+        return true;
+    }
+    else if (!strcmp(propName, "ABS_FOCUS_POSITION"))
     {
         for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
         {

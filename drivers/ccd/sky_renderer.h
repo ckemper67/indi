@@ -1,6 +1,23 @@
 #pragma once
 #include <indiccd.h>
 
+// Observer location and apparent-place context passed to renderFrame() when
+// ERFA-based per-star coordinate conversion is desired.
+// Set jd_utc = 0 (the default) to keep the legacy J2000 behaviour.
+struct ObserverContext
+{
+    double jd_utc    = 0.0;   // UTC Julian date; 0 = use raw J2000 positions
+    double lon_rad   = 0.0;   // observer longitude (radians, east positive)
+    double lat_rad   = 0.0;   // observer latitude  (radians, north positive)
+    double alt_m     = 0.0;   // observer altitude above geoid (metres)
+    double rar_proj  = 0.0;    // gnomonic centre RA  in apparent frame (radians)
+    double decr_proj = 0.0;    // gnomonic centre Dec in apparent frame (radians)
+    double phpa      = 1013.25; // atmospheric pressure (hPa); 0 = no refraction
+    double tc        = 15.0;   // temperature (Celsius)
+    double rh        = 0.5;    // relative humidity [0, 1]
+    double wl        = 0.55;   // wavelength (micrometers, green)
+};
+
 // Configuration parameters for the sky renderer.
 // All fields have sensible defaults; update via setConfig() when INDI properties change.
 struct RenderConfig
@@ -58,7 +75,8 @@ class SkyRenderer
                         double rotation_deg,
                         float  exposure_s,
                         bool   renderStars = true,
-                        double minSearchRadiusArcmin = 0);
+                        double minSearchRadiusArcmin = 0,
+                        const ObserverContext *obs = nullptr);
 
         float imageScaleX() const
         {

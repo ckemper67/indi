@@ -199,6 +199,18 @@ class CCDSim : public INDI::CCD, public INDI::FilterInterface
 
         double m_LastTemperature {0};
 
+        // Observer location snooped from mount GEOGRAPHIC_COORD (for ERFA apparent place)
+        double m_SiteLatitude  {0.0};   // degrees, north positive
+        double m_SiteLongitude {0.0};   // degrees, east positive
+        double m_SiteAltitude  {0.0};   // metres
+
+        // Weather snooped from WeatherDeviceTP; used for ERFA refraction
+        double m_WeatherPressure    {0.0};   // hPa; 0 = use altitude-derived fallback
+        double m_WeatherTemperature {15.0};  // Celsius
+        double m_WeatherHumidity    {0.5};   // relative humidity [0,1]
+
+        INDI::PropertyText WeatherDeviceTP {1};
+
         int streamPredicate {0};
         pthread_t primary_thread;
         bool terminateThread;

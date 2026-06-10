@@ -246,6 +246,10 @@ bool GuideSim::initProperties()
     // as it modifies the capabilities.
     setRGB(m_SimulateRGB);
 
+    WeatherDeviceTP[0].fill("WEATHER_SOURCE", "Device", "");
+    WeatherDeviceTP.fill(getDeviceName(), "GUIDE_WEATHER_SOURCE", "Weather Source",
+                         SIMULATOR_TAB, IP_RW, 60, IPS_IDLE);
+
     addDebugControl();
 
     setDriverInterface(getDriverInterface());
@@ -274,6 +278,7 @@ void GuideSim::ISGetProperties(const char * dev)
 
     defineProperty(SimulatorSettingsNP);
     defineProperty(EqPENP);
+    defineProperty(WeatherDeviceTP);
     defineProperty(SimulateRgbSP);
     defineProperty(ToggleTimeoutSP);
 }
@@ -436,11 +441,17 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
         theta = range360(theta);
         LOGF_DEBUG("Rotator Angle: %f, Camera Rotation: %f", RotatorAngle, theta);
 
+        // JNow coords for ERFA projection center; default to raw RA/Dec
+        double jnow_ra_hours = RA;
+        double jnow_dec_deg  = Dec;
+
 #ifdef USE_EQUATORIAL_PE
         if (m_UsePE)
         {
             m_CurrentRA  = raPE + m_GuideWEOffset;
             m_CurrentDEC = decPE + m_GuideNSOffset;
+            jnow_ra_hours = m_CurrentRA;
+            jnow_dec_deg  = m_CurrentDEC;
         }
         else
         {
@@ -459,6 +470,9 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
                 m_CurrentRA = 0;
                 m_CurrentDEC = 0;
             }
+
+            jnow_ra_hours = m_CurrentRA;
+            jnow_dec_deg  = m_CurrentDEC;
 
             INDI::IEquatorialCoordinates epochPos { m_CurrentRA, m_CurrentDEC }, J2000Pos { 0, 0 };
             INDI::ObservedToJ2000(&epochPos, ln_get_julian_from_sys(), &J2000Pos);
@@ -553,10 +567,28 @@ int GuideSim::DrawCcdFrame(INDI::CCDChip * targetChip)
 
         if (isLight || isFlat)
         {
+            ObserverContext obs;
+            obs.jd_utc    = ln_get_julian_from_sys();
+            obs.lon_rad   = m_SiteLongitude * (M_PI / 180.0);
+            obs.lat_rad   = m_SiteLatitude  * (M_PI / 180.0);
+            obs.alt_m     = m_SiteAltitude;
+            obs.phpa = (m_WeatherPressure > 0.0) ? m_WeatherPressure
+                       : 1013.25 * std::pow(1.0 - 2.25577e-5 * m_SiteAltitude, 5.25588);
+            obs.tc   = m_WeatherTemperature;
+            obs.rh   = m_WeatherHumidity;
+            obs.wl   = 0.55;
+            // JNow apparent boresight: same offsets as rar/decr but from JNow origin.
+            // King correction is not replicated here; the ~arcsec error is acceptable.
+            double const jnow_rad     = jnow_ra_hours * 15.0 + PEOffset + raTDrift + raRandomDrift;
+            double const jnow_decr_b  = (jnow_dec_deg + m_OAGoffset / 60.0) * DEGREES_TO_RADIANS;
+            double const jnow_decDrift = (m_PolarDrift * m_PolarError * std::cos(jnow_decr_b)) / 3.81;
+            obs.rar_proj  = jnow_rad * DEGREES_TO_RADIANS;
+            obs.decr_proj = jnow_decr_b + (decRandomDrift + decTDrift + jnow_decDrift / 3600.0) * DEGREES_TO_RADIANS;
+
             int drawn = m_Renderer.renderFrame(targetChip, rad, cameradec,
                                                targetFocalLength, theta,
                                                static_cast<float>(exposure_time), isLight,
-                                               kingMinRadius);
+                                               kingMinRadius, &obs);
             if (isLight && drawn < 0)
                 LOG_ERROR("Error launching gsc, is it installed with appropriate environment variables set?");
             else if (isLight && drawn == 0)
@@ -704,6 +736,24 @@ bool GuideSim::ISNewNumber(const char * dev, const char * name, double values[],
     return INDI::CCD::ISNewNumber(dev, name, values, names, n);
 }
 
+bool GuideSim::ISNewText(const char * dev, const char * name, char * texts[], char * names[], int n)
+{
+    if (dev != nullptr && strcmp(dev, getDeviceName()) == 0)
+    {
+        if (WeatherDeviceTP.isNameMatch(name))
+        {
+            WeatherDeviceTP.update(texts, names, n);
+            WeatherDeviceTP.setState(IPS_OK);
+            WeatherDeviceTP.apply();
+            if (WeatherDeviceTP[0].getText() && WeatherDeviceTP[0].getText()[0] != '\0')
+                IDSnoopDevice(WeatherDeviceTP[0].getText(), "WEATHER_PARAMETERS");
+            saveConfig(WeatherDeviceTP);
+            return true;
+        }
+    }
+    return INDI::CCD::ISNewText(dev, name, texts, names, n);
+}
+
 bool GuideSim::ISNewSwitch(const char * dev, const char * name, ISState * states, char * names[], int n)
 {
     if (dev != nullptr && strcmp(dev, getDeviceName()) == 0)
@@ -751,14 +801,52 @@ void GuideSim::activeDevicesUpdated()
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "EQUATORIAL_PE");
 #endif
     IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "EQUATORIAL_EOD_COORD");
+    IDSnoopDevice(ActiveDeviceTP[ACTIVE_TELESCOPE].getText(), "GEOGRAPHIC_COORD");
+    if (WeatherDeviceTP[0].getText() && WeatherDeviceTP[0].getText()[0] != '\0')
+        IDSnoopDevice(WeatherDeviceTP[0].getText(), "WEATHER_PARAMETERS");
 }
 
 bool GuideSim::ISSnoopDevice(XMLEle * root)
 {
+    const char * propName = findXMLAttValu(root, "name");
+    if (!strcmp(propName, "GEOGRAPHIC_COORD"))
+    {
+        XMLEle * ep = nullptr;
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            const char * name = findXMLAttValu(ep, "name");
+            if (!strcmp(name, "LAT"))
+                m_SiteLatitude  = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "LONG"))
+                m_SiteLongitude = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "ELEV"))
+                m_SiteAltitude  = atof(pcdataXMLEle(ep));
+        }
+        LOGF_DEBUG("Snooped site location: lat=%f lon=%f alt=%f",
+                   m_SiteLatitude, m_SiteLongitude, m_SiteAltitude);
+        return true;
+    }
+    else if (!strcmp(propName, "WEATHER_PARAMETERS"))
+    {
+        XMLEle * ep = nullptr;
+        for (ep = nextXMLEle(root, 1); ep != nullptr; ep = nextXMLEle(root, 0))
+        {
+            const char * name = findXMLAttValu(ep, "name");
+            if (!strcmp(name, "WEATHER_PRESSURE"))
+                m_WeatherPressure    = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "WEATHER_TEMPERATURE"))
+                m_WeatherTemperature = atof(pcdataXMLEle(ep));
+            else if (!strcmp(name, "WEATHER_HUMIDITY"))
+                m_WeatherHumidity    = atof(pcdataXMLEle(ep)) / 100.0;
+        }
+        LOGF_DEBUG("Snooped weather: pressure=%.1f hPa temperature=%.1f C humidity=%.0f%%",
+                   m_WeatherPressure, m_WeatherTemperature, m_WeatherHumidity * 100.0);
+        return true;
+    }
+
     // We try to snoop EQUATORIAL_PE first (true pointing with mount errors injected);
     // if not found we fall through to the regular EQUATORIAL_EOD_COORD snoop below.
 #ifdef USE_EQUATORIAL_PE
-    const char * propName = findXMLAttValu(root, "name");
     if (!strcmp(propName, "EQUATORIAL_PE"))
     {
         XMLEle * ep = nullptr;

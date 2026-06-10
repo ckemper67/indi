@@ -8,6 +8,36 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef HAVE_ERFA
+#include <erfa.h>
+
+// Convert an ICRS J2000 catalog position to equinox-based apparent place.
+// Uses eraAtco13 with refraction disabled so the result matches libnova's JNow frame.
+static void erfaApparentPlace(double ra_icrs, double dec_icrs,
+                              double jd_utc,
+                              double lon_rad, double lat_rad, double alt_m,
+                              double phpa, double tc, double rh, double wl,
+                              double *ra_app, double *dec_app)
+{
+    // Recommended 2-part UTC split at half-integer day (ERFA cookbook)
+    double utc1 = std::floor(jd_utc) + 0.5;
+    double utc2 = jd_utc - utc1;
+
+    double aob, zob, hob, dob, rob, eo;
+    eraAtco13(ra_icrs, dec_icrs,
+              0.0, 0.0, 0.0, 0.0,   // pmRA, pmDec, parallax, radial velocity
+              utc1, utc2, 0.0,       // UTC (2-part), DUT1=0
+              lon_rad, lat_rad, alt_m,
+              0.0, 0.0,              // polar motion xp, yp
+              phpa, tc, rh, wl,
+              &aob, &zob, &hob, &dob, &rob, &eo);
+
+    // rob is CIRS RA; subtract equation of origins to get equinox-based apparent RA
+    *ra_app  = eraAnp(rob - eo);
+    *dec_app = dob;
+}
+#endif // HAVE_ERFA
+
 static constexpr float kCenterWavelengthMM = 550e-6f;
 static constexpr float kMinApertureMM = 5.0f;
 
@@ -297,7 +327,8 @@ int SkyRenderer::renderFrame(
     double rotation_deg,
     float  exposure_s,
     bool   renderStars,
-    double minSearchRadiusArcmin)
+    double minSearchRadiusArcmin,
+    const ObserverContext *obs)
 {
     m_MaxPix = 0;
     m_MinPix = 65000;
@@ -317,8 +348,19 @@ int SkyRenderer::renderFrame(
     double const pf =  chip->getYRes() / 2.0;
     double const ccdW = chip->getXRes();
 
+    // J2000 center -- used only for the GSC catalog query
     double const rar  = ra_j2000_deg  * (M_PI / 180.0);
     double const decr = dec_j2000_deg * (M_PI / 180.0);
+
+#ifdef HAVE_ERFA
+    bool const useErfa = (obs != nullptr && obs->jd_utc > 0.0);
+#else
+    bool const useErfa = false;
+    (void)obs;
+#endif
+    // Gnomonic projection center: apparent place when ERFA is active, J2000 otherwise
+    double const rar_proj  = useErfa ? obs->rar_proj  : rar;
+    double const decr_proj = useErfa ? obs->decr_proj : decr;
 
     double radius = std::sqrt(
                         m_ImageScaleX * m_ImageScaleX * chip->getXRes() / 2.0 * chip->getXRes() / 2.0 +
@@ -363,17 +405,28 @@ int SkyRenderer::renderFrame(
                 if (rc != 12)
                     continue;
 
-                double const srar  = ra  * (M_PI / 180.0);
-                double const sdecr = dec * (M_PI / 180.0);
+                double srar, sdecr;
+#ifdef HAVE_ERFA
+                if (useErfa)
+                    erfaApparentPlace(ra * (M_PI / 180.0), dec * (M_PI / 180.0),
+                                      obs->jd_utc, obs->lon_rad, obs->lat_rad, obs->alt_m,
+                                      obs->phpa, obs->tc, obs->rh, obs->wl,
+                                      &srar, &sdecr);
+                else
+#endif
+                {
+                    srar  = ra  * (M_PI / 180.0);
+                    sdecr = dec * (M_PI / 180.0);
+                }
 
-                double const denom = cos(decr) * cos(sdecr) * cos(srar - rar)
-                                     + sin(decr) * sin(sdecr);
+                double const denom = cos(decr_proj) * cos(sdecr) * cos(srar - rar_proj)
+                                     + sin(decr_proj) * sin(sdecr);
                 if (denom <= 0)
                     continue;
 
-                double const sx = cos(sdecr) * sin(srar - rar) / denom;
-                double const sy = (sin(decr) * cos(sdecr) * cos(srar - rar)
-                                   - cos(decr) * sin(sdecr)) / denom;
+                double const sx = cos(sdecr) * sin(srar - rar_proj) / denom;
+                double const sy = (sin(decr_proj) * cos(sdecr) * cos(srar - rar_proj)
+                                   - cos(decr_proj) * sin(sdecr)) / denom;
 
                 double const ccdx = ccdW - (pa * sx + pb * sy + pc);
                 double const ccdy =          pd * sx + pe * sy + pf;
@@ -399,17 +452,28 @@ int SkyRenderer::renderFrame(
                 float const bsDecDeg = s_BrightStars[bsi].dec;
                 float const bsMag    = s_BrightStars[bsi].mag;
 
-                double const srar  = bsRaDeg  * (M_PI / 180.0);
-                double const sdecr = bsDecDeg * (M_PI / 180.0);
+                double srar, sdecr;
+#ifdef HAVE_ERFA
+                if (useErfa)
+                    erfaApparentPlace(bsRaDeg * (M_PI / 180.0), bsDecDeg * (M_PI / 180.0),
+                                      obs->jd_utc, obs->lon_rad, obs->lat_rad, obs->alt_m,
+                                      obs->phpa, obs->tc, obs->rh, obs->wl,
+                                      &srar, &sdecr);
+                else
+#endif
+                {
+                    srar  = bsRaDeg  * (M_PI / 180.0);
+                    sdecr = bsDecDeg * (M_PI / 180.0);
+                }
 
-                double const denom = cos(decr) * cos(sdecr) * cos(srar - rar)
-                                     + sin(decr) * sin(sdecr);
+                double const denom = cos(decr_proj) * cos(sdecr) * cos(srar - rar_proj)
+                                     + sin(decr_proj) * sin(sdecr);
                 if (denom <= 0)
                     continue;
 
-                double const sx = cos(sdecr) * sin(srar - rar) / denom;
-                double const sy = (sin(decr) * cos(sdecr) * cos(srar - rar)
-                                   - cos(decr) * sin(sdecr)) / denom;
+                double const sx = cos(sdecr) * sin(srar - rar_proj) / denom;
+                double const sy = (sin(decr_proj) * cos(sdecr) * cos(srar - rar_proj)
+                                   - cos(decr_proj) * sin(sdecr)) / denom;
 
                 double const ccdx = ccdW - (pa * sx + pb * sy + pc);
                 double const ccdy =          pd * sx + pe * sy + pf;

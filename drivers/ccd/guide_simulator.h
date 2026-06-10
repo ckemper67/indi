@@ -55,6 +55,7 @@ class GuideSim : public INDI::CCD
 
         virtual bool ISNewNumber(const char *dev, const char *name, double values[], char *names[], int n) override;
         virtual bool ISNewSwitch(const char *dev, const char *name, ISState *states, char *names[], int n) override;
+        virtual bool ISNewText(const char *dev, const char *name, char *texts[], char *names[], int n) override;
         virtual bool ISSnoopDevice(XMLEle *root) override;
 
         static void *streamVideoHelper(void *context);
@@ -160,6 +161,18 @@ class GuideSim : public INDI::CCD
         time_t m_RunStart;
         time_t m_LastSim;
         bool m_RunStartInitialized { false };
+
+        // Observer location snooped from mount GEOGRAPHIC_COORD (for ERFA apparent place)
+        double m_SiteLatitude  {0.0};   // degrees, north positive
+        double m_SiteLongitude {0.0};   // degrees, east positive
+        double m_SiteAltitude  {0.0};   // metres
+
+        // Weather snooped from WeatherDeviceTP; used for ERFA refraction
+        double m_WeatherPressure    {0.0};   // hPa; 0 = use altitude-derived fallback
+        double m_WeatherTemperature {15.0};  // Celsius
+        double m_WeatherHumidity    {0.5};   // relative humidity [0,1]
+
+        INDI::PropertyText WeatherDeviceTP {1};
 
         float m_PolarError { 0 };
         float m_PolarDrift { 0 };
