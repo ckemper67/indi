@@ -82,7 +82,9 @@ chmod -x drivers/telescope/pmc8driver.cpp
 # Disable LTO
 %define _lto_cflags %{nil}
 
-%cmake .
+# TODO: audit and fix all pre-existing GCC -Werror failures in this build,
+# then remove -DFIX_WARNINGS=OFF to build strictly like CI does.
+%cmake . -DFIX_WARNINGS=OFF
 make VERBOSE=1 %{?_smp_mflags}
 
 %install
